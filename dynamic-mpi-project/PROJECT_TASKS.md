@@ -1,279 +1,269 @@
-# Dynamic MPI Project --- Task Tracker
+mic MPI: Project Development Notebook
 
-> **Project duration:** 4 weeks\
-> **Implementation language:** C++17 with MPI\
-> **Working rule:** Mark a task `[x]` only after you have run or checked
-> the result. Keep notes for blockers and important decisions.
+**Research Paper:** Towards Dynamic Message Passing Protocols for Stencil-based Communication Patterns (IEEE Cluster 2025)
 
-## How to use this file
+**Project Objective:** Reproduce the paper's proposed dynamic communication protocols on the college-provided HPC cluster, evaluate their performance, and implement an extension.
 
--   `[ ]` = Not started
--   `[x]` = Completed
--   Update the **Progress log** at the end whenever you finish a
-    meaningful milestone.
--   Commit working milestones to Git so you can return to a known-good
-    version.
+---
 
-------------------------------------------------------------------------
+## 1. Project Status
 
-# Week 1 --- Cluster setup, paper analysis and baseline
+| Component | Status |
+|---|---|
+| Project structure | Completed |
+| Initial cluster configuration | Completed |
+| MPI compilation and execution | Completed |
+| Baseline smoke test | Completed |
+| Reproduction smoke test | Completed |
+| Extension smoke test | Completed |
+| Actual 3D stencil computation | Pending |
+| Standard MPI halo exchange | Pending |
+| Dynamic intra-node protocol | Pending |
+| Work-stealing implementation | Pending |
+| Overlap protocol | Pending |
+| Adaptive chunking implementation | Pending |
+| Performance evaluation | Pending |
 
-## 1. Cluster access and environment
+**Current milestone:** Initial cluster validation completed successfully.
 
--   [ ] Connect to the college cluster using SSH.
--   [ ] Check the C++ compiler version (`g++ --version`).
--   [ ] Check the MPI compiler wrapper (`mpicxx --version`).
--   [ ] Identify the MPI implementation and version
-    (`mpirun --version`).
--   [ ] Check CPU, core, NUMA and memory details (`lscpu`, `free -h`).
--   [ ] Check whether environment modules are available
-    (`module avail`).
--   [ ] Check whether OpenMP is supported by the compiler, if needed by
-    the paper.
--   [ ] Create the project directory on the cluster.
--   [ ] Initialize a Git repository and add a `.gitignore`.
--   [ ] Compile and run a minimal two-process MPI "hello world" program.
--   [ ] Record cluster/compiler/MPI details in `README.md` or
-    `docs/implementation.md`.
+---
 
-**Week 1 setup checkpoint:** You can compile and run a basic MPI C++
-program on the cluster.
+## 2. Phase 1 – Environment and Project Setup
 
-## 2. Understand the paper and define reproduction scope
+### Tasks
 
--   [ ] Read the paper once end-to-end.
--   [ ] Write down the problem the paper addresses.
--   [ ] Summarize the proposed solution in your own words.
--   [ ] Identify the baseline communication approach.
--   [ ] List the main components of the proposed protocol.
--   [ ] Identify which components are intra-node and which involve
-    inter-node MPI communication.
--   [ ] Identify the stencil computation and halo-exchange pattern used.
--   [ ] Record the key performance metrics and graphs reported in the
-    paper.
--   [ ] Identify the experiments that are feasible on the college
-    cluster.
--   [ ] Separate essential reproduction features from optional
-    optimizations.
--   [ ] Write the implementation scope and any assumptions in
-    `docs/paper_understanding.md`.
+- [x] Create the project repository.
+- [x] Establish the modular project structure.
+- [x] Configure C++17 and MPI compilation.
+- [x] Compile the baseline executable.
+- [x] Compile the reproduction executable.
+- [x] Compile the extension executable.
+- [x] Execute all three executables on the college cluster.
+- [x] Verify execution with different MPI process counts.
+- [ ] Document complete cluster hardware and network specifications.
+- [ ] Verify MPI implementation and available thread-support level.
 
-**Week 1 paper checkpoint:** You can explain the baseline, the proposed
-protocol, the key mechanisms and the results you intend to reproduce.
+### Initial Cluster Validation
 
-## 3. Project skeleton and build
+The following commands were executed successfully:
 
--   [x] Create the agreed project directory structure.
--   [x] Add the initial `Makefile`.
--   [x] Add a small MPI C++ executable under `apps/`.
--   [ ] Confirm the Makefile builds the executable with `mpicxx`.
--   [x] Add a clean target to remove generated build files.
--   [x] Document the build and run commands in `README.md`.
+```bash
+mpirun -np 1 ./build/baseline
+mpirun -np 2 ./build/baseline
 
-## 4. Baseline implementation
+mpirun -np 2 ./build/reproduction
 
--   [ ] Define the 3D grid representation and indexing.
--   [ ] Implement initialization of the 3D stencil data.
--   [ ] Implement the local stencil computation.
--   [ ] Decide and document the domain decomposition across MPI
-    processes.
--   [ ] Implement the baseline halo exchange.
--   [ ] Handle boundary conditions correctly.
--   [ ] Add basic correctness checks (for example, compare against a
-    small single-process reference).
--   [ ] Run the baseline with a small problem size.
--   [ ] Run the baseline with more than one MPI process.
--   [ ] Record baseline execution time and configuration.
+mpirun -np 2 ./build/extension
+```
 
-**Week 1 exit checkpoint:** A correct baseline stencil program runs on
-the cluster with multiple MPI processes.
+All executions completed without reported errors.
 
-------------------------------------------------------------------------
+### Initial Benchmark Results
 
-# Week 2 --- Reproduce the paper's dynamic protocol
+| Executable | Processes | Min (s) | Max (s) | Avg (s) |
+|---|---:|---:|---:|---:|
+| Baseline | 1 | 0.000084 | 0.000084 | 0.000084 |
+| Baseline | 2 | 0.000150 | 0.000518 | 0.000334 |
+| Reproduction | 2 | 0.000152 | 0.000232 | 0.000192 |
+| Extension | 2 | 0.000129 | 0.000132 | 0.000130 |
 
-## 5. Translate the paper design into code
+### Observations
 
--   [ ] Map each essential paper mechanism to a C++ function/class or
-    source file.
--   [ ] Identify the data structures and synchronization required by
-    each mechanism.
--   [ ] Decide which parts use MPI and which parts use
-    shared-memory/thread mechanisms.
--   [ ] Document message ownership, buffer lifetime and synchronization
-    assumptions.
--   [ ] Create a small implementation plan for the dynamic protocol
-    before coding.
+1. All executables successfully initialized their respective modules.
+2. MPI execution works with both one and two processes.
+3. The reproduction and extension executables successfully initialized their additional modules.
+4. The dynamic protocol configuration currently reports:
+   - Intra-node optimization: Enabled
+   - Default chunk size: 4096 bytes
+   - Thread support: Supported
+5. The adaptive chunking module successfully loads and reports its dynamic chunk-sizing policy.
 
-## 6. Implement the required intra-node mechanisms
+**Important:** These measurements are initial smoke-test timings, not valid performance comparisons. The actual stencil computation, communication operations and protocol implementations still need to be completed and verified.
 
-> Only implement mechanisms that are actually required by the paper's
-> design and your chosen reproduction scope.
+---
 
--   [ ] Implement the required shared-memory communication mechanism.
--   [ ] Implement the required queue or work-distribution mechanism(s).
--   [ ] Implement synchronization and thread-safety.
--   [ ] Add focused correctness checks for the intra-node components.
--   [ ] Test edge cases such as empty work, uneven work and
-    shutdown/termination.
--   [ ] Record any deviations from the paper.
+## 3. Phase 2 – Baseline MPI Implementation
 
-## 7. Implement and integrate the dynamic protocol
+**Objective:** Implement a conventional MPI-based 3D stencil benchmark to establish the performance baseline.
 
--   [ ] Implement the protocol's message/work scheduling logic.
--   [ ] Implement the required MPI communication operations.
--   [ ] Integrate the protocol with the stencil and halo-exchange code.
--   [ ] Check that send/receive ordering cannot deadlock.
--   [ ] Check that MPI buffers remain valid until nonblocking operations
-    complete.
--   [ ] Check that all processes and threads terminate cleanly.
--   [ ] Build the reproduction executable.
--   [ ] Run a small correctness test.
--   [ ] Compare its numerical output with the baseline.
--   [ ] Run a multi-process cluster test and resolve correctness issues.
+### Tasks
 
-**Week 2 exit checkpoint:** The reproduced protocol runs correctly on a
-small cluster workload and produces results consistent with the
-baseline.
+- [x] Create baseline module structure.
+- [x] Initialize stencil module.
+- [x] Initialize halo-exchange module.
+- [x] Initialize benchmark utilities.
+- [ ] Implement actual 3D grid initialization.
+- [ ] Implement domain decomposition among MPI processes.
+- [ ] Identify neighbouring processes.
+- [ ] Implement seven-point stencil computation.
+- [ ] Implement halo exchange using standard MPI.
+- [ ] Implement non-blocking communication using MPI_Isend and MPI_Irecv.
+- [ ] Implement computation and communication timing.
+- [ ] Validate numerical correctness.
+- [ ] Test different grid sizes.
+- [ ] Test different process counts and node configurations.
 
-------------------------------------------------------------------------
+### Expected Deliverable
 
-# Week 3 --- Extension: adaptive chunking
+A working conventional MPI 3D stencil benchmark with measurable communication and computation costs.
 
-## 8. Define the extension
+---
 
--   [ ] State the limitation or opportunity in the original approach
-    that adaptive chunking targets.
--   [ ] Define what a chunk represents in this implementation.
--   [ ] Decide which measurable signal controls chunk size (for example,
-    workload size or observed communication/computation time).
--   [ ] Define the initial chunk-size policy.
--   [ ] Define minimum and maximum chunk sizes.
--   [ ] Define how and when chunk size is updated.
--   [ ] Write down the hypothesis and expected benefit in
-    `docs/implementation.md`.
+## 4. Phase 3 – Reproduction of Dynamic Intra-node Protocol
 
-## 9. Implement and validate adaptive chunking
+**Objective:** Implement the paper's dynamic receiver-initiated communication and work-stealing mechanism.
 
--   [ ] Implement the chunking policy in
-    `extensions/adaptive_chunking.cpp`.
--   [ ] Connect the extension to the reproduced protocol without
-    changing the baseline.
--   [ ] Add safeguards for very small and very large chunks.
--   [ ] Test correctness against the baseline.
--   [ ] Test at least two fixed chunk sizes as comparison points.
--   [ ] Test the adaptive policy.
--   [ ] Check for load imbalance, excessive scheduling overhead and
-    communication overhead.
--   [ ] Fix correctness or stability issues.
--   [ ] Record the final policy and parameters.
+### Tasks
 
-**Week 3 exit checkpoint:** The extension runs correctly and can be
-compared fairly with the original reproduced protocol.
+**Queue Implementation**
 
-------------------------------------------------------------------------
+- [ ] Implement SPSC metadata/control queues.
+- [ ] Implement SPMC work-stealing queues.
+- [ ] Implement atomic synchronization.
+- [ ] Implement release/acquire memory ordering.
+- [ ] Implement work-stealer availability tracking using bitmasks.
 
-# Week 4 --- Experiments, analysis and submission
+**Dynamic Protocol**
 
-## 10. Prepare experiments
+- [ ] Implement RTS message handling.
+- [ ] Implement CTS message handling.
+- [ ] Implement GET protocol.
+- [ ] Implement COOP protocol.
+- [ ] Implement generic work-stealing protocol.
+- [ ] Implement dynamic protocol selection using completion bits.
+- [ ] Implement chunk management.
+- [ ] Implement progress engine.
+- [ ] Implement request completion and FIN handling.
 
--   [ ] Choose a small set of problem sizes that fit the cluster
-    allocation.
--   [ ] Choose MPI process counts supported by the cluster.
--   [ ] Choose thread counts if the implementation uses threads.
--   [ ] Define repeated runs for each configuration.
--   [ ] Keep compiler flags and runtime settings consistent across
-    comparisons.
--   [ ] Decide which metrics to collect (at minimum, execution time; add
-    communication or overlap metrics if available).
--   [ ] Create or finalize `experiments/run_experiments.sh`.
--   [ ] Ensure each result records its configuration and implementation
-    version.
+**Validation**
 
-## 11. Run and verify experiments
+- [ ] Test queue correctness independently.
+- [ ] Test multiple producers/consumers under the intended queue ownership model.
+- [ ] Validate message integrity.
+- [ ] Test concurrent communication.
+- [ ] Detect race conditions and deadlocks.
+- [ ] Compare against conventional MPI.
 
--   [ ] Run baseline experiments.
--   [ ] Run reproduced-protocol experiments.
--   [ ] Run fixed-chunk extension experiments.
--   [ ] Run adaptive-chunk extension experiments.
--   [ ] Repeat runs to reduce the effect of noise.
--   [ ] Check for failed, incomplete or anomalous runs.
--   [ ] Save raw measurements in `experiments/results/`.
--   [ ] Keep a copy of the exact commands and configurations used.
+### Expected Deliverable
 
-## 12. Analyze and document results
+A working dynamic intra-node communication prototype implementing the paper's receiver-initiated protocol.
 
--   [ ] Calculate summary statistics (for example, mean and standard
-    deviation).
--   [ ] Generate comparison plots.
--   [ ] Compare baseline against the reproduced protocol.
--   [ ] Compare the reproduced protocol against the extension.
--   [ ] Explain where the extension helps, does not help, or adds
-    overhead.
--   [ ] Discuss limitations and any differences from the paper's
-    environment.
--   [ ] Update `docs/experiments.md` with methodology, configurations
-    and findings.
--   [ ] Update `docs/implementation.md` with final implementation
-    details.
--   [ ] Update `README.md` with build, run and reproduction
-    instructions.
+---
 
-## 13. Final verification and handoff
+## 5. Phase 4 – Reproduction of the Overlap Protocol
 
--   [ ] Perform a clean build from source.
--   [ ] Run one final correctness test for each executable.
--   [ ] Verify that experiment scripts and instructions are accurate.
--   [ ] Remove temporary files and avoid committing passwords or cluster
-    credentials.
--   [ ] Check that raw results and plots are present.
--   [ ] Review the project against the course submission requirements.
--   [ ] Prepare a concise explanation of the paper, reproduction and
-    extension.
--   [ ] Prepare the final report or presentation, if required.
+**Objective:** Investigate and implement the paper's library-managed receive-buffer approach to improve inter-node and intra-node communication overlap.
 
-**Week 4 exit checkpoint:** The baseline, reproduction and extension
-have been tested; results are saved; and another person can follow the
-README to build and run the project.
+### Tasks
 
-------------------------------------------------------------------------
+- [ ] Implement a rendezvous communication benchmark.
+- [ ] Measure inter-node communication independently.
+- [ ] Measure intra-node communication independently.
+- [ ] Measure combined communication latency.
+- [ ] Investigate missed overlap opportunities.
+- [ ] Study the relevant MPI implementation internals.
+- [ ] Investigate library-managed receive buffers.
+- [ ] Implement MPIX_Get_recv_buf().
+- [ ] Implement MPIX_Release_recv_buf().
+- [ ] Integrate modified receive semantics if feasible.
+- [ ] Evaluate communication overlap.
 
-# Priority guide
+### Expected Deliverable
 
-If time becomes tight, protect these deliverables in this order:
+An overlap benchmark and, subject to MPI implementation access, a prototype of the proposed receive-buffer extension.
 
-1.  **Must have:** Cluster build/run setup and a correct baseline.
-2.  **Must have:** A correct implementation of the paper's essential
-    mechanism.
-3.  **Must have:** A fair baseline-versus-reproduction comparison.
-4.  **Target:** A small, correct adaptive-chunking extension.
-5.  **Target:** Experiments across multiple process counts/problem
-    sizes.
-6.  **Polish:** Additional optimizations, extensive plots and optional
-    components.
+---
 
-Do not sacrifice correctness and reproducible measurements to add more
-features.
+## 6. Phase 5 – Proposed Project Extension
 
-------------------------------------------------------------------------
+**Selected Extension: Adaptive Chunk-Size Selection**
 
-# Progress log
+**Objective:** Investigate whether a more systematic adaptive chunk-sizing policy can improve intra-node communication performance.
 
-Add a dated entry when you complete a milestone or make an important
-implementation decision.
+### Tasks
 
-  Date         Milestone / decision      Result, evidence or next action
-  ------------ ------------------------- ---------------------------------
-  YYYY-MM-DD   Project tracker created   
-                                         
-                                         
+- [ ] Establish a fixed chunk-size baseline.
+- [ ] Reproduce the paper's original dynamic chunking mechanism.
+- [ ] Design an adaptive chunk-size selection policy.
+- [ ] Consider communication history and worker availability.
+- [ ] Implement runtime chunk-size adjustment.
+- [ ] Prevent unstable or excessive chunk-size changes.
+- [ ] Compare all three approaches.
+- [ ] Evaluate performance across different message sizes.
+- [ ] Analyze scalability and overhead.
 
-# Blockers and notes
+### Comparison
 
-Use this section to record cluster issues, paper ambiguities,
-implementation deviations and decisions that need revisiting.
+1. Fixed chunk size.
+2. Paper's dynamic chunking.
+3. Proposed adaptive chunk sizing.
 
--   **Blocker:**
--   **Impact:**
--   **Next action:**
--   **Decision / resolution:**
+### Expected Deliverable
+
+A comparative evaluation demonstrating whether the proposed extension provides measurable improvements.
+
+---
+
+## 7. Phase 6 – Performance Evaluation
+
+### Experimental Variables
+
+| Parameter | Planned configurations |
+|---|---|
+| Grid dimensions | 16³, 32³, 64³ |
+| Message sizes | 256 KB, 512 KB, 1 MB, 2 MB |
+| Processes per node | 16, 32, 64, 128 (subject to availability) |
+| Number of nodes | 1, 2, 4, 8 (subject to availability) |
+| Protocols | Baseline, static, dynamic, adaptive |
+
+### Metrics
+
+- Total execution time.
+- Intra-node communication latency.
+- Inter-node communication latency.
+- Communication throughput.
+- Communication overlap percentage.
+- Protocol switching overhead.
+- Chunk-size adaptation overhead.
+
+### Tasks
+
+- [ ] Automate experiment execution.
+- [ ] Store raw results in CSV files.
+- [ ] Repeat experiments for reliable measurements.
+- [ ] Calculate median and variability.
+- [ ] Generate performance graphs.
+- [ ] Compare against the original paper's results.
+- [ ] Explain differences due to cluster hardware and configuration.
+
+---
+
+## 8. Current Next Steps
+
+**Immediate priority: Complete the actual baseline implementation.**
+
+1. Inspect the current baseline source files.
+2. Replace the initialization-only skeletons with actual 3D stencil computation.
+3. Implement MPI domain decomposition.
+4. Implement halo exchange.
+5. Add numerical correctness validation.
+6. Run the benchmark with 1, 2 and multiple MPI processes.
+7. Record the actual communication and computation timings.
+
+Only after validating the baseline should the dynamic communication implementation begin.
+
+---
+
+## 9. Development Notes
+
+- Keep baseline, reproduction and extension implementations independent.
+- Implement and test one module at a time.
+- Use AI assistance for implementation, but verify synchronization and communication correctness manually.
+- Maintain a record of every experiment and its configuration.
+- Do not treat successful compilation or module initialization as proof of protocol reproduction.
+- Preserve baseline results for all subsequent comparisons.
+
+**Latest Update:** 18 November 2026
+
+**Current Milestone:** Initial project configuration successfully tested on the college HPC cluster. Baseline, reproduction and extension executables all launch successfully. Actual communication and protocol implementation is the next priority.
+
