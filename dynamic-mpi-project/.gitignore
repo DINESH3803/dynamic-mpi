@@ -1,0 +1,29 @@
+# Build outputs
+build/
+bin/
+*.o
+*.a
+*.so
+*.dylib
+
+# Experiment raw outputs and generated plots
+experiments/results/*
+!experiments/results/.gitkeep
+experiments/plots/*
+!experiments/plots/.gitkeep
+
+# Core dumps and logs
+core
+core.*
+*.log
+slurm-*.out
+
+# Editor and OS files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
