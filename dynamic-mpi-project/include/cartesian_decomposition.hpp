@@ -34,12 +34,15 @@ public:
     CartesianDecomposition(int global_nx, int global_ny, int global_nz,
                            MPI_Comm comm_world = MPI_COMM_WORLD);
 
-    // Destructor: cleans up Cartesian communicator
+    // Destructor: safely cleans up Cartesian communicator before MPI_Finalize
     ~CartesianDecomposition();
 
     // Initializes or re-initializes Cartesian topology and partitioning
     void initialize(int global_nx, int global_ny, int global_nz,
                     MPI_Comm comm_world = MPI_COMM_WORLD);
+
+    // Explicit manual communicator cleanup (also called automatically by destructor)
+    void free();
 
     // -------------------------------------------------------------------------
     // Communicators & Process Attributes
@@ -102,8 +105,12 @@ public:
     // and spatial offsets determined by this decomposition.
     Grid3D create_grid(int halo_depth = 1, double initial_val = 0.0) const;
 
-    // Prints diagnostic decomposition information for this rank
+    // Prints diagnostic decomposition information for this rank individually
     void print_info() const;
+
+    // Gathers decomposition metadata from all processes to rank 0 and prints
+    // in strict rank order (0, 1, ..., num_procs - 1), preventing stdout race conditions
+    void print_gathered_info() const;
 
     // -------------------------------------------------------------------------
     // Static Decomposition Utilities

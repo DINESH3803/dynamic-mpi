@@ -26,48 +26,58 @@ int main(int argc, char* argv[]) {
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &size);
 
-    double start_time = get_timestamp_seconds();
+    // -------------------------------------------------------------------------
+    // Inner Block Scope:
+    // Ensures all C++ objects (CartesianDecomposition, Grid3D, containers, etc.)
+    // are constructed and destructed strictly BEFORE MPI_Finalize() is called.
+    // This prevents any MPI routine (e.g. MPI_Comm_free) from executing post-finalization.
+    // -------------------------------------------------------------------------
+    {
+        double start_time = get_timestamp_seconds();
 
-    if (rank == 0) {
-        std::cout << "==========================================================\n"
-                  << " [Baseline] Conventional 3D Stencil MPI Verification\n"
-                  << " Processes : " << size << "\n"
-                  << " Standard  : C++11 / MPI\n"
-                  << "==========================================================\n";
-    }
+        if (rank == 0) {
+            std::cout << "==========================================================\n"
+                      << " [Baseline] Conventional 3D Stencil MPI Verification\n"
+                      << " Processes : " << size << "\n"
+                      << " Standard  : C++11 / MPI\n"
+                      << "==========================================================\n";
+        }
 
-    // Run module-level smoke and correctness tests
-    stencil_smoke_test(rank);
-    cartesian_decomposition_smoke_test(MPI_COMM_WORLD);
-    halo_exchange_smoke_test(rank);
-    benchmark_smoke_test(rank);
+        // Run module-level smoke and correctness tests
+        stencil_smoke_test(rank);
+        cartesian_decomposition_smoke_test(MPI_COMM_WORLD);
+        halo_exchange_smoke_test(rank);
+        benchmark_smoke_test(rank);
 
-    // Global domain configuration (64x64x64 as specified in Task 4)
-    StencilConfig cfg;
-    cfg.nx = 64;
-    cfg.ny = 64;
-    cfg.nz = 64;
+        // Global domain configuration (64x64x64 as specified in Task 4)
+        StencilConfig cfg;
+        cfg.nx = 64;
+        cfg.ny = 64;
+        cfg.nz = 64;
 
-    if (rank == 0) {
-        print_stencil_info(cfg);
-    }
+        if (rank == 0) {
+            print_stencil_info(cfg);
+        }
 
-    // Initialize 3D Cartesian domain decomposition for baseline execution
-    CartesianDecomposition decomp(cfg.nx, cfg.ny, cfg.nz, MPI_COMM_WORLD);
-    decomp.print_info();
+        // Initialize 3D Cartesian domain decomposition for baseline execution
+        CartesianDecomposition decomp(cfg.nx, cfg.ny, cfg.nz, MPI_COMM_WORLD);
 
-    // Create local Grid3D partitioned according to the decomposition
-    Grid3D local_grid = decomp.create_grid(cfg.halo_depth, Grid3D::DEFAULT_GHOST_VALUE);
-    local_grid.initialize_deterministic(decomp.offset_x(), decomp.offset_y(), decomp.offset_z());
+        // Print gathered decomposition diagnostics ordered by rank (avoids output interleaving)
+        decomp.print_gathered_info();
 
-    MPI_Barrier(MPI_COMM_WORLD);
-    double elapsed = get_timestamp_seconds() - start_time;
-    BenchmarkStats stats = aggregate_benchmark_time(elapsed, MPI_COMM_WORLD);
+        // Create local Grid3D partitioned according to the decomposition
+        Grid3D local_grid = decomp.create_grid(cfg.halo_depth, Grid3D::DEFAULT_GHOST_VALUE);
+        local_grid.initialize_deterministic(decomp.offset_x(), decomp.offset_y(), decomp.offset_z());
 
-    if (rank == 0) {
-        print_benchmark_summary("Baseline Verification", stats, rank);
-        std::cout << "[Baseline] All verification tests and domain decomposition completed successfully.\n";
-    }
+        MPI_Barrier(MPI_COMM_WORLD);
+        double elapsed = get_timestamp_seconds() - start_time;
+        BenchmarkStats stats = aggregate_benchmark_time(elapsed, MPI_COMM_WORLD);
+
+        if (rank == 0) {
+            print_benchmark_summary("Baseline Verification", stats, rank);
+            std::cout << "[Baseline] All verification tests and domain decomposition completed successfully.\n";
+        }
+    } // <-- All MPI-dependent objects (decomp, local_grid) are cleanly destroyed here
 
     MPI_Finalize();
     return 0;

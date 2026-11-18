@@ -6,6 +6,18 @@
 #include <vector>
 
 // ==============================================================================
+// POD Structure for Rank-Wise Diagnostic Gathering
+// ==============================================================================
+struct DecompositionSummary {
+    int rank;
+    int coords[3];
+    int dims[3];
+    int local_dims[3];
+    int offsets[3];
+    HaloNeighbors neighbors;
+};
+
+// ==============================================================================
 // Implementation: CartesianDecomposition Class & Verification
 // ==============================================================================
 
@@ -39,11 +51,18 @@ CartesianDecomposition::~CartesianDecomposition() {
     free_communicator();
 }
 
+void CartesianDecomposition::free() {
+    free_communicator();
+}
+
 void CartesianDecomposition::free_communicator() {
-    if (comm_cart_ != MPI_COMM_NULL && comm_cart_ != MPI_COMM_WORLD) {
+    // Check if MPI has already been finalized before calling any MPI cleanup routines
+    int finalized = 0;
+    MPI_Finalized(&finalized);
+    if (!finalized && comm_cart_ != MPI_COMM_NULL && comm_cart_ != MPI_COMM_WORLD) {
         MPI_Comm_free(&comm_cart_);
-        comm_cart_ = MPI_COMM_NULL;
     }
+    comm_cart_ = MPI_COMM_NULL;
 }
 
 void CartesianDecomposition::determine_process_grid(int num_procs, int dims[3]) {
@@ -156,6 +175,50 @@ void CartesianDecomposition::print_info() const {
               << "\n";
 }
 
+void CartesianDecomposition::print_gathered_info() const {
+    DecompositionSummary my_summary;
+    my_summary.rank = rank_;
+    my_summary.coords[0] = coords_[0];
+    my_summary.coords[1] = coords_[1];
+    my_summary.coords[2] = coords_[2];
+    my_summary.dims[0] = dims_[0];
+    my_summary.dims[1] = dims_[1];
+    my_summary.dims[2] = dims_[2];
+    my_summary.local_dims[0] = local_nx_;
+    my_summary.local_dims[1] = local_ny_;
+    my_summary.local_dims[2] = local_nz_;
+    my_summary.offsets[0] = offset_x_;
+    my_summary.offsets[1] = offset_y_;
+    my_summary.offsets[2] = offset_z_;
+    my_summary.neighbors = neighbors_;
+
+    std::vector<DecompositionSummary> all_summaries;
+    if (rank_ == 0) {
+        all_summaries.resize(num_procs_);
+    }
+
+    MPI_Comm gather_comm = (comm_cart_ != MPI_COMM_NULL) ? comm_cart_ : comm_world_;
+    MPI_Gather(&my_summary, sizeof(DecompositionSummary), MPI_BYTE,
+               all_summaries.data(), sizeof(DecompositionSummary), MPI_BYTE,
+               0, gather_comm);
+
+    if (rank_ == 0) {
+        for (int r = 0; r < num_procs_; ++r) {
+            const DecompositionSummary& s = all_summaries[r];
+            std::cout << "[Rank " << s.rank << "] Cart Coords: ("
+                      << s.coords[0] << ", " << s.coords[1] << ", " << s.coords[2] << ") | "
+                      << "Process Grid: " << s.dims[0] << "x" << s.dims[1] << "x" << s.dims[2] << " | "
+                      << "Local Subdomain: " << s.local_dims[0] << "x" << s.local_dims[1] << "x" << s.local_dims[2] << " | "
+                      << "Global Offsets: (" << s.offsets[0] << ", " << s.offsets[1] << ", " << s.offsets[2] << ")\n"
+                      << "[Rank " << s.rank << "] Neighbors: "
+                      << "Left=" << s.neighbors.left << ", Right=" << s.neighbors.right
+                      << ", Down=" << s.neighbors.down << ", Up=" << s.neighbors.up
+                      << ", Back=" << s.neighbors.back << ", Front=" << s.neighbors.front
+                      << "\n";
+        }
+    }
+}
+
 // ------------------------------------------------------------------------------
 // Verification Suite for Cartesian Domain Decomposition
 // ------------------------------------------------------------------------------
@@ -196,7 +259,6 @@ bool cartesian_decomposition_smoke_test(MPI_Comm comm) {
     if (world_size == 1) {
         assert(decomp.local_nx() == 64 && decomp.local_ny() == 64 && decomp.local_nz() == 64);
         assert(decomp.offset_x() == 0  && decomp.offset_y() == 0  && decomp.offset_z() == 0);
-        // All boundary neighbors must be MPI_PROC_NULL
         assert(decomp.neighbor_left()  == MPI_PROC_NULL);
         assert(decomp.neighbor_right() == MPI_PROC_NULL);
         assert(decomp.neighbor_down()  == MPI_PROC_NULL);
@@ -204,7 +266,6 @@ bool cartesian_decomposition_smoke_test(MPI_Comm comm) {
         assert(decomp.neighbor_back()  == MPI_PROC_NULL);
         assert(decomp.neighbor_front() == MPI_PROC_NULL);
     } else if (world_size == 2) {
-        // 2x1x1 decomposition divides along X
         assert(decomp.local_nx() == 32 && decomp.local_ny() == 64 && decomp.local_nz() == 64);
         assert(decomp.offset_y() == 0 && decomp.offset_z() == 0);
 
@@ -222,15 +283,12 @@ bool cartesian_decomposition_smoke_test(MPI_Comm comm) {
         assert(decomp.neighbor_back()  == MPI_PROC_NULL);
         assert(decomp.neighbor_front() == MPI_PROC_NULL);
     } else if (world_size == 4) {
-        // 2x2x1 decomposition divides along X and Y
         assert(decomp.local_nx() == 32 && decomp.local_ny() == 32 && decomp.local_nz() == 64);
         assert(decomp.offset_z() == 0);
 
-        // Z boundaries are always MPI_PROC_NULL
         assert(decomp.neighbor_back()  == MPI_PROC_NULL);
         assert(decomp.neighbor_front() == MPI_PROC_NULL);
 
-        // Boundary checks for X
         if (decomp.coord_x() == 0) {
             assert(decomp.offset_x() == 0);
             assert(decomp.neighbor_left() == MPI_PROC_NULL);
@@ -241,7 +299,6 @@ bool cartesian_decomposition_smoke_test(MPI_Comm comm) {
             assert(decomp.neighbor_right() == MPI_PROC_NULL);
         }
 
-        // Boundary checks for Y
         if (decomp.coord_y() == 0) {
             assert(decomp.offset_y() == 0);
             assert(decomp.neighbor_down() == MPI_PROC_NULL);
@@ -267,7 +324,6 @@ bool cartesian_decomposition_smoke_test(MPI_Comm comm) {
         assert(total_vol == expected_vol);
     }
 
-    // Gather bounding boxes to rank 0 to check disjointness
     struct SubdomainBox {
         int ox, oy, oz;
         int lx, ly, lz;
@@ -289,7 +345,6 @@ bool cartesian_decomposition_smoke_test(MPI_Comm comm) {
     if (world_rank == 0) {
         for (int i = 0; i < world_size; ++i) {
             for (int j = i + 1; j < world_size; ++j) {
-                // Check if bounding box i and j overlap
                 bool overlap_x = std::max(all_boxes[i].ox, all_boxes[j].ox) <
                                  std::min(all_boxes[i].ox + all_boxes[i].lx, all_boxes[j].ox + all_boxes[j].lx);
                 bool overlap_y = std::max(all_boxes[i].oy, all_boxes[j].oy) <
@@ -298,7 +353,7 @@ bool cartesian_decomposition_smoke_test(MPI_Comm comm) {
                                  std::min(all_boxes[i].oz + all_boxes[i].lz, all_boxes[j].oz + all_boxes[j].lz);
 
                 bool intersect = overlap_x && overlap_y && overlap_z;
-                assert(!intersect); // Must have zero overlap
+                assert(!intersect);
             }
         }
     }
@@ -306,7 +361,6 @@ bool cartesian_decomposition_smoke_test(MPI_Comm comm) {
     // -------------------------------------------------------------------------
     // Test 4: Remainder Handling for Non-Divisible Dimensions
     // -------------------------------------------------------------------------
-    // Validate block decomposition algorithm with non-divisible size
     const int test_rem_g = 65;
     const int test_rem_p = 2;
     int rem_l0 = 0, rem_o0 = 0;
