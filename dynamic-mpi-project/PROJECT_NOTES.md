@@ -1,4 +1,8 @@
+<<<<<<< HEAD:dynamic-mpi-project/PROJECT_TASKS.md
 # Dynamic MPI Project — Task Tracker
+=======
+mic MPI Project --- Task Tracker
+>>>>>>> c267cca6f3acdec9b3fe87b3dff9f0af2b9ef148:dynamic-mpi-project/PROJECT_NOTES.md
 
 > **Project duration:** 4 weeks  
 
@@ -430,6 +434,7 @@ Do not sacrifice correctness and reproducible measurements to add more features.
 
 - **Current status:** All three project executables compile and run successfully using MPICH 3.2.1 + Intel ICC 18.0.2. They are smoke tests, not completed implementations.
 
+<<<<<<< HEAD:dynamic-mpi-project/PROJECT_TASKS.md
 - **Implementation gap:** Current modules are initialization skeletons; actual communication protocols and stencil computation remain to be implemented.
 
 - **Performance note:** Initial timings are smoke-test measurements and must not be used to claim performance improvements.
@@ -438,3 +443,10 @@ Do not sacrifice correctness and reproducible measurements to add more features.
 - **Next action:** Complete the conventional MPI 3D stencil baseline before implementing the dynamic protocol.
 
 - **Future consideration:** Investigate access to MPI implementation source code for the library-managed receive-buffer contribution.
+=======
+-   **Blocker:**
+-   **Impact:**
+-   **Next action:**
+-   **Decision / resolution:*
+
+>>>>>>> c267cca6f3acdec9b3fe87b3dff9f0af2b9ef148:dynamic-mpi-project/PROJECT_NOTES.md
