@@ -1,6 +1,7 @@
 #include <mpi.h>
 #include <iostream>
 #include "stencil.hpp"
+#include "cartesian_decomposition.hpp"
 #include "halo_exchange.hpp"
 #include "benchmark.hpp"
 
@@ -8,8 +9,8 @@
 // Executable: baseline
 // Purpose:
 //   Entry point for the conventional 3D stencil baseline.
-//   Initial state: MPI smoke test verifying process initialization, topology
-//   skeletons, and timing aggregation.
+//   Verifies process initialization, 3D Cartesian domain decomposition,
+//   grid allocation, and timing aggregation.
 // ==============================================================================
 
 int main(int argc, char* argv[]) {
@@ -29,33 +30,45 @@ int main(int argc, char* argv[]) {
 
     if (rank == 0) {
         std::cout << "==========================================================\n"
-                  << " [Baseline] Conventional 3D Stencil MPI Smoke Test\n"
+                  << " [Baseline] Conventional 3D Stencil MPI Verification\n"
                   << " Processes : " << size << "\n"
                   << " Standard  : C++11 / MPI\n"
                   << "==========================================================\n";
     }
 
-    // Run module-level smoke tests to verify symbol linkage
+    // Run module-level smoke and correctness tests
     stencil_smoke_test(rank);
+    cartesian_decomposition_smoke_test(MPI_COMM_WORLD);
     halo_exchange_smoke_test(rank);
     benchmark_smoke_test(rank);
 
-    // Stencil configuration placeholder
+    // Global domain configuration (64x64x64 as specified in Task 4)
     StencilConfig cfg;
+    cfg.nx = 64;
+    cfg.ny = 64;
+    cfg.nz = 64;
+
     if (rank == 0) {
         print_stencil_info(cfg);
     }
+
+    // Initialize 3D Cartesian domain decomposition for baseline execution
+    CartesianDecomposition decomp(cfg.nx, cfg.ny, cfg.nz, MPI_COMM_WORLD);
+    decomp.print_info();
+
+    // Create local Grid3D partitioned according to the decomposition
+    Grid3D local_grid = decomp.create_grid(cfg.halo_depth, Grid3D::DEFAULT_GHOST_VALUE);
+    local_grid.initialize_deterministic(decomp.offset_x(), decomp.offset_y(), decomp.offset_z());
 
     MPI_Barrier(MPI_COMM_WORLD);
     double elapsed = get_timestamp_seconds() - start_time;
     BenchmarkStats stats = aggregate_benchmark_time(elapsed, MPI_COMM_WORLD);
 
     if (rank == 0) {
-        print_benchmark_summary("Baseline Smoke Test", stats, rank);
-        std::cout << "[Baseline] Smoke test completed successfully.\n";
+        print_benchmark_summary("Baseline Verification", stats, rank);
+        std::cout << "[Baseline] All verification tests and domain decomposition completed successfully.\n";
     }
 
     MPI_Finalize();
     return 0;
 }
-

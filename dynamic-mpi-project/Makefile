@@ -13,6 +13,7 @@ DEPFLAGS = -MMD -MP
 
 COMMON_OBJS = \
 	$(OBJ_DIR)/src/stencil.o \
+	$(OBJ_DIR)/src/cartesian_decomposition.o \
 	$(OBJ_DIR)/src/halo_exchange.o \
 	$(OBJ_DIR)/src/benchmark.o
 

@@ -160,7 +160,7 @@ All four executions completed successfully without reported errors.
 
 - [x] Implement the local stencil computation.
 
-- [ ] Decide and document domain decomposition across MPI processes.
+- [x] Decide and document domain decomposition across MPI processes.
 
 - [ ] Implement baseline halo exchange.
 
