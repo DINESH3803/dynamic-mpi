@@ -44,7 +44,7 @@ int main(int argc, char* argv[]) {
 
         // Run module-level smoke tests to verify symbol linkage
         stencil_smoke_test(rank);
-        halo_exchange_smoke_test(rank);
+        halo_exchange_smoke_test(MPI_COMM_WORLD);
         dynamic_protocol_smoke_test(rank);
         benchmark_smoke_test(rank);
 

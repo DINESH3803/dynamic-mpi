@@ -103,6 +103,5 @@ bool verify_halo_exchange(const Grid3D& grid, const CartesianDecomposition& deco
 
 // Automated verification suite for non-blocking MPI halo exchange
 bool halo_exchange_smoke_test(MPI_Comm comm = MPI_COMM_WORLD);
-bool halo_exchange_smoke_test(int rank);
 
 #endif // DYNAMIC_MPI_HALO_EXCHANGE_HPP

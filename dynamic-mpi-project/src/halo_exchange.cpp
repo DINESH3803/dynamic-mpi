@@ -490,7 +490,3 @@ bool halo_exchange_smoke_test(MPI_Comm comm) {
 
     return true;
 }
-
-bool halo_exchange_smoke_test(int /*rank*/) {
-    return halo_exchange_smoke_test(MPI_COMM_WORLD);
-}
