@@ -162,7 +162,7 @@ All four executions completed successfully without reported errors.
 
 - [x] Decide and document domain decomposition across MPI processes.
 
-- [ ] Implement baseline halo exchange.
+- [x] Implement baseline halo exchange.
 
 - [ ] Handle boundary conditions correctly.
 

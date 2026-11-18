@@ -43,7 +43,7 @@ dynamic-mpi-project/
 - **Responsibility:** Establishes 3D MPI Cartesian topologies (`MPI_Cart_create`), derives process coordinates (`MPI_Cart_coords`), queries 6-direction neighbors (`MPI_Cart_shift`), and computes 3D block decompositions with remainder handling across 1, 2, and 4 processes.
 
 ### 2.3 `halo_exchange` Module
-- **Responsibility:** Manages Cartesian process topology (6-neighbor decomposition along $\pm X, \pm Y, \pm Z$). Packs boundary surfaces into contiguous buffers and exchanges ghost cells using standard non-blocking MPI point-to-point calls (`MPI_Isend`, `MPI_Irecv`).
+- **Responsibility:** Manages 6-face non-blocking MPI halo exchange (`MPI_Irecv`, `MPI_Isend`, `MPI_Waitall`). Packs interior boundary planes into contiguous buffers, posts receives before sends, exchanges ghost cells across Cartesian neighbors, and unpacks received planes into ghost layers while preserving physical-boundary placeholders (`MPI_PROC_NULL`).
 
 ### 2.4 `dynamic_protocol` Module
 - **Responsibility:** Implements the paper's dynamic protocol:
@@ -78,7 +78,7 @@ dynamic-mpi-project/
 | **Deterministic Init (Task 2)** | Week 1 | Completed | Coordinate-based deterministic global formula |
 | **Local 7-Point Stencil (Task 3)** | Week 1 | Completed | Jacobi stencil kernel, double buffering, ghost preservation |
 | **Cartesian Decomposition (Task 4)** | Week 1 | Completed | MPI_Cart topology, 1/2/4 proc layouts, remainder handling |
-| **Baseline Halo Exchange (Task 5)** | Week 1 | Pending | Non-blocking MPI Isend/Irecv boundary synchronization |
+| **Baseline Halo Exchange (Task 5)** | Week 1 | Completed | Non-blocking MPI Isend/Irecv boundary synchronization |
 | **Paper Reproduction** | Week 2 | Pending | Dynamic protocol, SPSC queues, receiver-initiated coordination |
 | **Adaptive Chunking** | Week 3 | Pending | Dynamic chunk-size adjustment based on latency feedback |
 | **Cluster Experiments** | Week 4 | Pending | Multi-node scaling benchmarks, plots, paper comparison |
