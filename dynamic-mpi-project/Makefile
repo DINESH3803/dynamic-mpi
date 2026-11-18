@@ -1,11 +1,6 @@
+override CXX = mpicxx
 
-CXX = mpicxx
-
-<<<<<<< HEAD
 CXXFLAGS = -std=c++11 -O3 -Wall -Wextra -pedantic
-=======
-CXXFLAGS = -std=c++17 -O3 -Wall -Wextra -pedantic
->>>>>>> c267cca6f3acdec9b3fe87b3dff9f0af2b9ef148
 CPPFLAGS = -Iinclude
 LDFLAGS =
 LDLIBS =
@@ -85,7 +80,4 @@ help:
 	@echo "make reproduction - Build reproduction"
 	@echo "make extension    - Build extension"
 	@echo "make clean        - Remove build directory"
-<<<<<<< HEAD
-=======
 
->>>>>>> c267cca6f3acdec9b3fe87b3dff9f0af2b9ef148
