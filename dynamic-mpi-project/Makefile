@@ -1,4 +1,5 @@
-override CXX = mpicxx
+
+verride CXX = mpicxx
 
 CXXFLAGS = -std=c++11 -O3 -Wall -Wextra -pedantic
 CPPFLAGS = -Iinclude

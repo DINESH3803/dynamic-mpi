@@ -41,6 +41,9 @@ struct StencilConfig {
 // ==============================================================================
 class Grid3D {
 public:
+    // Designated default placeholder value for unexchanged ghost/halo cells
+    static const double DEFAULT_GHOST_VALUE;
+
     // Default constructor: unallocated empty grid
     Grid3D();
 
@@ -151,7 +154,24 @@ public:
     const double* data() const { return data_.data(); }
 
     // -------------------------------------------------------------------------
-    // Initialization & Memory Utilities
+    // Deterministic Initialization (Task 2)
+    // -------------------------------------------------------------------------
+    // Evaluates deterministic formula: u(gx, gy, gz) = 1.0 + 0.01*gx + 0.0001*gy + 0.000001*gz
+    static double evaluate_initial_condition(int gx, int gy, int gz);
+
+    // Initializes local interior cells using explicit global starting offsets.
+    // Ghost cells are filled with ghost_val placeholder.
+    void initialize_deterministic(int global_start_x,
+                                  int global_start_y,
+                                  int global_start_z,
+                                  double ghost_val = -1.0);
+
+    // Initializes local interior cells using the grid's internal offset_x/y/z.
+    // Ghost cells are filled with ghost_val placeholder.
+    void initialize_deterministic(double ghost_val = -1.0);
+
+    // -------------------------------------------------------------------------
+    // Memory Fill & Swap Utilities
     // -------------------------------------------------------------------------
     // Fills entire allocated array (interior + halos) with a constant value
     void fill(double value);
