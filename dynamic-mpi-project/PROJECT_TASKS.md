@@ -158,7 +158,7 @@ All four executions completed successfully without reported errors.
 
 - [x] Implement initialization of the 3D stencil data.
 
-- [ ] Implement the local stencil computation.
+- [x] Implement the local stencil computation.
 
 - [ ] Decide and document domain decomposition across MPI processes.
 

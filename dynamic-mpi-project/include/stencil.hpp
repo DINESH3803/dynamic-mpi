@@ -171,7 +171,7 @@ public:
     void initialize_deterministic(double ghost_val = -1.0);
 
     // -------------------------------------------------------------------------
-    // Memory Fill & Swap Utilities
+    // Memory Fill, Copy & Swap Utilities
     // -------------------------------------------------------------------------
     // Fills entire allocated array (interior + halos) with a constant value
     void fill(double value);
@@ -181,6 +181,9 @@ public:
 
     // Fills only the halo / ghost cells with a constant value
     void fill_halo(double value);
+
+    // Copies ghost/halo cell values from another grid (dimensions must match)
+    void copy_ghosts_from(const Grid3D& source);
 
     // Constant-time swap of grid internal state (for double-buffering)
     void swap(Grid3D& other);
@@ -206,6 +209,23 @@ private:
 
     std::vector<double> data_;
 };
+
+// ==============================================================================
+// 7-Point 3D Jacobi Stencil Computation (Task 3)
+// ==============================================================================
+
+// Computes a single local 7-point Jacobi stencil step:
+//   u_new(i,j,k) = (1/6) * (u_old(i-1,j,k) + u_old(i+1,j,k) +
+//                           u_old(i,j-1,k) + u_old(i,j+1,k) +
+//                           u_old(i,j,k-1) + u_old(i,j,k+1))
+// Only interior cells (0 <= i < nx, 0 <= j < ny, 0 <= k < nz) are computed.
+// Ghost cell values from u_old are preserved in u_new.
+void compute_stencil_step(const Grid3D& u_old, Grid3D& u_new);
+
+// Executes multiple 7-point Jacobi stencil iterations using double buffering.
+// Swaps u_curr and u_next after each step.
+// After completion, u_curr contains the final state, and u_next contains scratch.
+void compute_stencil_iterations(Grid3D& u_curr, Grid3D& u_next, int num_iterations);
 
 // Prints basic stencil configuration details (useful for smoke tests and diagnostics)
 void print_stencil_info(const StencilConfig& config);
