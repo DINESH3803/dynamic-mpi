@@ -156,7 +156,7 @@ All four executions completed successfully without reported errors.
 
 - [x] Define the 3D grid representation and indexing.
 
-- [ ] Implement initialization of the 3D stencil data.
+- [x] Implement initialization of the 3D stencil data.
 
 - [ ] Implement the local stencil computation.
 
