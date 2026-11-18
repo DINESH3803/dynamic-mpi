@@ -31,7 +31,7 @@ int main(int argc, char* argv[]) {
         std::cout << "==========================================================\n"
                   << " [Baseline] Conventional 3D Stencil MPI Smoke Test\n"
                   << " Processes : " << size << "\n"
-                  << " Standard  : C++17 / MPI\n"
+                  << " Standard  : C++11 / MPI\n"
                   << "==========================================================\n";
     }
 

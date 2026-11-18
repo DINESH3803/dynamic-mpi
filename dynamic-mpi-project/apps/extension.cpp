@@ -37,7 +37,7 @@ int main(int argc, char* argv[]) {
                   << " [Extension] Adaptive Chunking MPI Smoke Test\n"
                   << " Processes       : " << size << "\n"
                   << " Thread Support  : " << (provided >= MPI_THREAD_FUNNELED ? "Supported" : "Single-thread only") << "\n"
-                  << " Standard        : C++17 / MPI\n"
+                  << " Standard        : C++11 / MPI\n"
                   << "==========================================================\n";
     }
 

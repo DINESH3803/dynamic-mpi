@@ -1,41 +1,32 @@
-# ==============================================================================
-# Dynamic MPI Project - Makefile
-# ==============================================================================
-# Targets:
-#   make all          - Builds baseline, reproduction, and extension binaries
-#   make baseline     - Builds conventional 3D stencil baseline (build/baseline)
-#   make reproduction - Builds dynamic communication protocol (build/reproduction)
-#   make extension    - Builds adaptive chunking extension (build/extension)
-#   make clean        - Removes all generated build artifacts
-# ==============================================================================
 
-CXX      := mpicxx
-CXXFLAGS := -std=c++17 -O3 -Wall -Wextra -pedantic
-INCLUDES := -Iinclude
+CXX = mpicxx
 
-BUILD_DIR := build
-BIN_DIR   := $(BUILD_DIR)
-OBJ_DIR   := $(BUILD_DIR)/obj
+CXXFLAGS = -std=c++11 -O3 -Wall -Wextra -pedantic
+CPPFLAGS = -Iinclude
+LDFLAGS =
+LDLIBS =
 
-# Core shared modules
-COMMON_OBJS := $(OBJ_DIR)/src/stencil.o \
-               $(OBJ_DIR)/src/halo_exchange.o \
-               $(OBJ_DIR)/src/benchmark.o
+BUILD_DIR = build
+OBJ_DIR = $(BUILD_DIR)/obj
 
-# Dynamic protocol module (reproduction)
-PROTO_OBJ   := $(OBJ_DIR)/src/dynamic_protocol.o
+DEPFLAGS = -MMD -MP
 
-# Adaptive chunking module (extension)
-EXT_OBJ     := $(OBJ_DIR)/extensions/adaptive_chunking.o
+COMMON_OBJS = \
+	$(OBJ_DIR)/src/stencil.o \
+	$(OBJ_DIR)/src/halo_exchange.o \
+	$(OBJ_DIR)/src/benchmark.o
 
-# Application binaries
-BASELINE_BIN     := $(BIN_DIR)/baseline
-REPRODUCTION_BIN := $(BIN_DIR)/reproduction
-EXTENSION_BIN    := $(BIN_DIR)/extension
+PROTO_OBJ = $(OBJ_DIR)/src/dynamic_protocol.o
+EXT_OBJ = $(OBJ_DIR)/extensions/adaptive_chunking.o
 
-# ------------------------------------------------------------------------------
-# Phony Targets
-# ------------------------------------------------------------------------------
+BASELINE_OBJ = $(OBJ_DIR)/apps/baseline.o
+REPRODUCTION_OBJ = $(OBJ_DIR)/apps/reproduction.o
+EXTENSION_MAIN_OBJ = $(OBJ_DIR)/apps/extension.o
+
+BASELINE_BIN = $(BUILD_DIR)/baseline
+REPRODUCTION_BIN = $(BUILD_DIR)/reproduction
+EXTENSION_BIN = $(BUILD_DIR)/extension
+
 .PHONY: all baseline reproduction extension clean help
 
 all: baseline reproduction extension
@@ -46,52 +37,47 @@ reproduction: $(REPRODUCTION_BIN)
 
 extension: $(EXTENSION_BIN)
 
-# ------------------------------------------------------------------------------
-# Link Executables (explicit dependencies only - no wildcard linking)
-# ------------------------------------------------------------------------------
-$(BASELINE_BIN): $(OBJ_DIR)/apps/baseline.o $(COMMON_OBJS)
-	@mkdir -p $(BIN_DIR)
-	$(CXX) $(CXXFLAGS) $^ -o $@
-	@echo "Built baseline executable: $@"
+$(BASELINE_BIN): $(BASELINE_OBJ) $(COMMON_OBJS)
+	$(CXX) $(LDFLAGS) $^ $(LDLIBS) -o $@
+	@echo "Built baseline: $@"
 
-$(REPRODUCTION_BIN): $(OBJ_DIR)/apps/reproduction.o $(COMMON_OBJS) $(PROTO_OBJ)
-	@mkdir -p $(BIN_DIR)
-	$(CXX) $(CXXFLAGS) $^ -o $@
-	@echo "Built reproduction executable: $@"
+$(REPRODUCTION_BIN): $(REPRODUCTION_OBJ) $(COMMON_OBJS) $(PROTO_OBJ)
+	$(CXX) $(LDFLAGS) $^ $(LDLIBS) -o $@
+	@echo "Built reproduction: $@"
 
-$(EXTENSION_BIN): $(OBJ_DIR)/apps/extension.o $(COMMON_OBJS) $(PROTO_OBJ) $(EXT_OBJ)
-	@mkdir -p $(BIN_DIR)
-	$(CXX) $(CXXFLAGS) $^ -o $@
-	@echo "Built extension executable: $@"
+$(EXTENSION_BIN): $(EXTENSION_MAIN_OBJ) $(COMMON_OBJS) $(PROTO_OBJ) $(EXT_OBJ)
+	$(CXX) $(LDFLAGS) $^ $(LDLIBS) -o $@
+	@echo "Built extension: $@"
 
-# ------------------------------------------------------------------------------
-# Compile Source Files
-# ------------------------------------------------------------------------------
 $(OBJ_DIR)/src/%.o: src/%.cpp
 	@mkdir -p $(dir $@)
-	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(DEPFLAGS) -c $< -o $@
 
 $(OBJ_DIR)/apps/%.o: apps/%.cpp
 	@mkdir -p $(dir $@)
-	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(DEPFLAGS) -c $< -o $@
 
 $(OBJ_DIR)/extensions/%.o: extensions/%.cpp
 	@mkdir -p $(dir $@)
-	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(DEPFLAGS) -c $< -o $@
 
-# ------------------------------------------------------------------------------
-# Clean
-# ------------------------------------------------------------------------------
+DEPS = $(COMMON_OBJS:.o=.d) \
+       $(PROTO_OBJ:.o=.d) \
+       $(EXT_OBJ:.o=.d) \
+       $(BASELINE_OBJ:.o=.d) \
+       $(REPRODUCTION_OBJ:.o=.d) \
+       $(EXTENSION_MAIN_OBJ:.o=.d)
+
+-include $(DEPS)
+
 clean:
-	rm -rf $(OBJ_DIR) $(BASELINE_BIN) $(REPRODUCTION_BIN) $(EXTENSION_BIN)
+	rm -rf $(BUILD_DIR)
 	@echo "Clean completed."
 
 help:
 	@echo "Dynamic MPI Project Build System"
-	@echo "Available targets:"
-	@echo "  make all          - Build baseline, reproduction, and extension"
-	@echo "  make baseline     - Build baseline executable only"
-	@echo "  make reproduction - Build reproduction executable only"
-	@echo "  make extension    - Build extension executable only"
-	@echo "  make clean        - Remove build artifacts"
-
+	@echo "make all          - Build all executables"
+	@echo "make baseline     - Build baseline"
+	@echo "make reproduction - Build reproduction"
+	@echo "make extension    - Build extension"
+	@echo "make clean        - Remove build directory"
