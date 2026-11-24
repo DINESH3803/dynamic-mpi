@@ -22,6 +22,7 @@ EXT_OBJ = $(OBJ_DIR)/extensions/adaptive_chunking.o
 SHM_REGION_OBJ = $(OBJ_DIR)/src/shm_region.o
 SPSC_QUEUE_OBJ = $(OBJ_DIR)/src/spsc_queue.o
 SPMC_QUEUE_OBJ = $(OBJ_DIR)/src/spmc_queue.o
+MPSC_QUEUE_OBJ = $(OBJ_DIR)/src/mpsc_queue.o
 
 BASELINE_OBJ = $(OBJ_DIR)/apps/baseline.o
 REPRODUCTION_OBJ = $(OBJ_DIR)/apps/reproduction.o
@@ -29,6 +30,7 @@ EXTENSION_MAIN_OBJ = $(OBJ_DIR)/apps/extension.o
 SHM_REGION_TEST_OBJ = $(OBJ_DIR)/apps/shm_region_test.o
 SPSC_QUEUE_TEST_OBJ = $(OBJ_DIR)/apps/spsc_queue_test.o
 SPMC_QUEUE_TEST_OBJ = $(OBJ_DIR)/apps/spmc_queue_test.o
+MPSC_QUEUE_TEST_OBJ = $(OBJ_DIR)/apps/mpsc_queue_test.o
 
 BASELINE_BIN = $(BUILD_DIR)/baseline
 REPRODUCTION_BIN = $(BUILD_DIR)/reproduction
@@ -36,8 +38,9 @@ EXTENSION_BIN = $(BUILD_DIR)/extension
 SHM_REGION_TEST_BIN = $(BUILD_DIR)/shm_region_test
 SPSC_QUEUE_TEST_BIN = $(BUILD_DIR)/spsc_queue_test
 SPMC_QUEUE_TEST_BIN = $(BUILD_DIR)/spmc_queue_test
+MPSC_QUEUE_TEST_BIN = $(BUILD_DIR)/mpsc_queue_test
 
-.PHONY: all baseline reproduction extension shm_region_test spsc_queue_test spmc_queue_test clean help
+.PHONY: all baseline reproduction extension shm_region_test spsc_queue_test spmc_queue_test mpsc_queue_test clean help
 
 all: baseline reproduction extension
 
@@ -52,6 +55,8 @@ shm_region_test: $(SHM_REGION_TEST_BIN)
 spsc_queue_test: $(SPSC_QUEUE_TEST_BIN)
 
 spmc_queue_test: $(SPMC_QUEUE_TEST_BIN)
+
+mpsc_queue_test: $(MPSC_QUEUE_TEST_BIN)
 
 $(BASELINE_BIN): $(BASELINE_OBJ) $(COMMON_OBJS)
 	$(CXX) $(LDFLAGS) $^ $(LDLIBS) -o $@
@@ -77,6 +82,10 @@ $(SPMC_QUEUE_TEST_BIN): $(SPMC_QUEUE_TEST_OBJ) $(SPMC_QUEUE_OBJ) $(SHM_REGION_OB
 	$(CXX) $(LDFLAGS) $^ $(LDLIBS) -o $@
 	@echo "Built spmc_queue_test: $@"
 
+$(MPSC_QUEUE_TEST_BIN): $(MPSC_QUEUE_TEST_OBJ) $(MPSC_QUEUE_OBJ) $(SHM_REGION_OBJ)
+	$(CXX) $(LDFLAGS) $^ $(LDLIBS) -o $@
+	@echo "Built mpsc_queue_test: $@"
+
 $(OBJ_DIR)/src/%.o: src/%.cpp
 	@mkdir -p $(dir $@)
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(DEPFLAGS) -c $< -o $@
@@ -100,7 +109,9 @@ DEPS = $(COMMON_OBJS:.o=.d) \
        $(SPSC_QUEUE_OBJ:.o=.d) \
        $(SPSC_QUEUE_TEST_OBJ:.o=.d) \
        $(SPMC_QUEUE_OBJ:.o=.d) \
-       $(SPMC_QUEUE_TEST_OBJ:.o=.d)
+       $(SPMC_QUEUE_TEST_OBJ:.o=.d) \
+       $(MPSC_QUEUE_OBJ:.o=.d) \
+       $(MPSC_QUEUE_TEST_OBJ:.o=.d)
 
 -include $(DEPS)
 
@@ -117,5 +128,6 @@ help:
 	@echo "make shm_region_test - Build ShmRegion shared-memory test"
 	@echo "make spsc_queue_test - Build shared-memory SPSC queue test"
 	@echo "make spmc_queue_test - Build shared-memory SPMC queue test"
+	@echo "make mpsc_queue_test - Build shared-memory MPSC queue test"
 	@echo "make clean        - Remove build directory"
 
