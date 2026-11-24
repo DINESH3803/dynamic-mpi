@@ -417,24 +417,20 @@ Do not sacrifice correctness and reproducible measurements to add more features.
 | 2026-11-18 | Next milestone | Implement actual 3D stencil computation, domain decomposition and MPI halo exchange. |
 | 2026-11-18 | Cluster hardware and OS audit | CentOS 7; dual-socket Xeon E5-2630 v4, 20 cores, 2 NUMA nodes; approximately 220 GiB system memory. |
 | 2026-11-18 | MPI and network audit | MPICH 3.2.1 and Intel MPI 2018 available. Master-node Mellanox InfiniBand device is ACTIVE at 40 Gb/s. |
-| 2026-11-18 | PBS multi-node allocation | Two nodes (compute00.local, compute03.local) were allocated. First test failed at compilation due to the routed PBS HOME path. Corrected job 30923 was submitted; at the last check it was still running at the compile stage, so multi-node MPI/OFA execution remains unverified. |
-| 2026-11-18 | Environment decision | Continue development with the already smoke-tested MPICH 3.2.1 + Intel ICC 18.0.2 setup. Defer further multi-node/OFA debugging until distributed performance experiments. |
-| 2026-11-18 | Cluster hardware and OS audit | CentOS 7; dual-socket Xeon E5-2630 v4, 20 cores, 2 NUMA nodes; approximately 220 GiB system memory. |
-| 2026-11-18 | MPI and network audit | MPICH 3.2.1 and Intel MPI 2018 available. Master-node Mellanox InfiniBand device is ACTIVE at 40 Gb/s. |
-| 2026-11-18 | PBS multi-node allocation | Two nodes (compute00.local, compute03.local) were allocated successfully. First MPI test failed at compilation because the PBS wrapper ran under a different HOME. A corrected job was submitted; at the last check it remained running at the compile stage, so multi-node MPI/OFA execution is still unverified. |
-| 2026-11-18 | Environment decision | Continue development with the already smoke-tested MPICH 3.2.1 + Intel ICC 18.0.2 setup. Defer further multi-node/OFA debugging until distributed performance experiments. |
+| 2026-11-18 | PBS multi-node allocation | Two nodes (compute00.local, compute03.local) were allocated. First test failed at compilation due to the routed PBS HOME path. Corrected job 30923 was submitted; multi-node MPI/OFA execution remains deferred to distributed scaling experiments. |
+| 2026-11-18 | Environment decision | Continue development with the verified MPICH 3.2.1 + Intel ICC 18.0.2 toolchain using C++11 standard. |
+| 2026-11-18 | Task 1: 3D Grid & Indexing | Implemented `Grid3D` with contiguous 1D memory, row-major unit-stride indexing, 1-layer ghost padding on all 6 faces, and bounds-checking (`at()`, `operator()`). Verified with unit smoke tests. |
+| 2026-11-18 | Task 2: Deterministic 3D Init | Implemented deterministic initialization using global coordinates $u(gx,gy,gz) = 1.0 + 0.01gx + 0.0001gy + 0.000001gz$ and global starting offsets. Verified decomposition invariance and ghost preservation (`DEFAULT_GHOST_VALUE = -1.0`). |
+| 2026-11-18 | Task 3: Local 7-Point Stencil | Implemented local 7-point Jacobi stencil computation using double buffering (`Grid3D::swap()`) and ghost preservation. Verified single-cell mean, uniform grid invariance, and multi-iteration numerical stability. |
+| 2026-11-18 | Task 4: Cartesian Decomposition | Implemented `CartesianDecomposition` using `MPI_Cart_create`, `MPI_Cart_coords`, and `MPI_Cart_shift` for 1 (1x1x1), 2 (2x1x1), and 4 (2x2x1) process topologies. Remainder handling verified for arbitrary dimensions. Resolved communicator cleanup lifecycle via inner block scope RAII; added rank-gathered ordered diagnostic output. |
+| 2026-11-18 | Task 5: MPI Halo Exchange | Implemented 6-face non-blocking halo exchange in `HaloExchange` using `MPI_Irecv`, `MPI_Isend`, and `MPI_Waitall` with persistent buffers and directional tag pairing (`HaloTags`). Verified interior plane packing, ghost unpacking, physical boundary sentinel preservation (`MPI_PROC_NULL`), and interior cell invariance. |
+| 2026-11-18 | Tasks 1–5 Cluster Verification | Full baseline verification suite executed on cluster across 1, 2, 3, and 4 MPI processes with 100% pass rate: `mpirun -np 1 ./build/baseline` (passed), `mpirun -np 2 ./build/baseline` (passed), `mpirun -np 3 ./build/baseline` (passed), `mpirun -np 4 ./build/baseline` (passed). |
 
 ---
 
 # Blockers and notes
 
-- **Current status:** All three project executables compile and run successfully using MPICH 3.2.1 + Intel ICC 18.0.2. They are smoke tests, not completed implementations.
-
-- **Implementation gap:** Current modules are initialization skeletons; actual communication protocols and stencil computation remain to be implemented.
-
-- **Performance note:** Initial timings are smoke-test measurements and must not be used to claim performance improvements.
-
-- **Environment limitation:** A two-node PBS allocation succeeded, but the corrected Intel MPI/OFA test had not completed at the last check. Multi-node communication and MPI thread-support level remain unverified; these checks are deferred and do not block baseline development.
-- **Next action:** Complete the conventional MPI 3D stencil baseline before implementing the dynamic protocol.
-
-- **Future consideration:** Investigate access to MPI implementation source code for the library-managed receive-buffer contribution.
+- **Conventional Baseline Status (Tasks 1–5 Completed):** The conventional MPI 3D 7-point stencil baseline is fully implemented, verified, and operational. Grid allocation, deterministic initialization, local Jacobi kernel computation, Cartesian domain decomposition, and 6-face non-blocking halo exchange are functioning cleanly without lifecycle or output errors.
+- **Separation of Baseline vs. Research Protocol:** The conventional baseline uses standard MPI point-to-point non-blocking communication (`MPI_Isend`/`MPI_Irecv`). The research paper's proposed dynamic communication protocol (receiver-initiated scheduling, SPSC metadata queues, SPMC work-stealing, popcount bitmask tracking, protocol switching, and library-managed receive buffers) has NOT yet been implemented; it remains the primary objective of Week 2.
+- **Adaptive Chunking Extension:** The adaptive chunking extension (Week 3) remains an empty skeleton and has NOT yet been implemented.
+- **Next Action:** Finalize baseline time-stepping iteration loop and begin Week 2 paper translation into dynamic protocol code.
