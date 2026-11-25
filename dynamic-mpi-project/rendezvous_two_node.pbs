@@ -1,0 +1,28 @@
+#!/bin/bash
+#PBS -q workq
+#PBS -l select=2:ncpus=4:mpiprocs=4
+#PBS -l place=scatter
+#PBS -l walltime=00:10:00
+#PBS -j oe
+
+echo "========== RENDEZVOUS LAYER TWO-NODE TEST =========="
+
+cd /home/student4/BT2024199/Project/dynamic-mpi/dynamic-mpi-project || exit 1
+
+module load intel-2018
+
+echo "========== NODE ALLOCATION =========="
+cat "$PBS_NODEFILE"
+echo "========== NODE DISTRIBUTION =========="
+sort "$PBS_NODEFILE" | uniq -c
+
+echo "========== MPI VERSION =========="
+mpirun --version
+
+echo "========== RUNNING RENDEZVOUS TEST =========="
+mpirun -np 8 -ppn 4 -f "$PBS_NODEFILE" ./build/rendezvous_layer_test
+
+status=$?
+
+echo "========== TEST EXIT CODE: $status =========="
+exit "$status"
