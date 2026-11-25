@@ -25,6 +25,7 @@ SPMC_QUEUE_OBJ = $(OBJ_DIR)/src/spmc_queue.o
 MPSC_QUEUE_OBJ = $(OBJ_DIR)/src/mpsc_queue.o
 CHUNK_TASK_ENGINE_OBJ = $(OBJ_DIR)/src/chunk_task_engine.o
 CONTROL_CHANNEL_OBJ = $(OBJ_DIR)/src/control_channel.o
+RENDEZVOUS_LAYER_OBJ = $(OBJ_DIR)/src/rendezvous_layer.o
 
 BASELINE_OBJ = $(OBJ_DIR)/apps/baseline.o
 REPRODUCTION_OBJ = $(OBJ_DIR)/apps/reproduction.o
@@ -35,6 +36,7 @@ SPMC_QUEUE_TEST_OBJ = $(OBJ_DIR)/apps/spmc_queue_test.o
 MPSC_QUEUE_TEST_OBJ = $(OBJ_DIR)/apps/mpsc_queue_test.o
 CHUNK_TASK_ENGINE_TEST_OBJ = $(OBJ_DIR)/apps/chunk_task_engine_test.o
 CONTROL_CHANNEL_TEST_OBJ = $(OBJ_DIR)/apps/control_channel_test.o
+RENDEZVOUS_LAYER_TEST_OBJ = $(OBJ_DIR)/apps/rendezvous_layer_test.o
 
 BASELINE_BIN = $(BUILD_DIR)/baseline
 REPRODUCTION_BIN = $(BUILD_DIR)/reproduction
@@ -45,8 +47,9 @@ SPMC_QUEUE_TEST_BIN = $(BUILD_DIR)/spmc_queue_test
 MPSC_QUEUE_TEST_BIN = $(BUILD_DIR)/mpsc_queue_test
 CHUNK_TASK_ENGINE_TEST_BIN = $(BUILD_DIR)/chunk_task_engine_test
 CONTROL_CHANNEL_TEST_BIN = $(BUILD_DIR)/control_channel_test
+RENDEZVOUS_LAYER_TEST_BIN = $(BUILD_DIR)/rendezvous_layer_test
 
-.PHONY: all baseline reproduction extension shm_region_test spsc_queue_test spmc_queue_test mpsc_queue_test chunk_task_engine_test control_channel_test clean help
+.PHONY: all baseline reproduction extension shm_region_test spsc_queue_test spmc_queue_test mpsc_queue_test chunk_task_engine_test control_channel_test rendezvous_layer_test clean help
 
 all: baseline reproduction extension
 
@@ -67,6 +70,8 @@ mpsc_queue_test: $(MPSC_QUEUE_TEST_BIN)
 chunk_task_engine_test: $(CHUNK_TASK_ENGINE_TEST_BIN)
 
 control_channel_test: $(CONTROL_CHANNEL_TEST_BIN)
+
+rendezvous_layer_test: $(RENDEZVOUS_LAYER_TEST_BIN)
 
 $(BASELINE_BIN): $(BASELINE_OBJ) $(COMMON_OBJS)
 	$(CXX) $(LDFLAGS) $^ $(LDLIBS) -o $@
@@ -104,6 +109,10 @@ $(CONTROL_CHANNEL_TEST_BIN): $(CONTROL_CHANNEL_TEST_OBJ) $(CONTROL_CHANNEL_OBJ) 
 	$(CXX) $(LDFLAGS) $^ $(LDLIBS) -o $@
 	@echo "Built control_channel_test: $@"
 
+$(RENDEZVOUS_LAYER_TEST_BIN): $(RENDEZVOUS_LAYER_TEST_OBJ) $(RENDEZVOUS_LAYER_OBJ) $(CONTROL_CHANNEL_OBJ) $(SPSC_QUEUE_OBJ) $(SHM_REGION_OBJ)
+	$(CXX) $(LDFLAGS) $^ $(LDLIBS) -o $@
+	@echo "Built rendezvous_layer_test: $@"
+
 $(OBJ_DIR)/src/%.o: src/%.cpp
 	@mkdir -p $(dir $@)
 	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(DEPFLAGS) -c $< -o $@
@@ -131,7 +140,7 @@ DEPS = $(COMMON_OBJS:.o=.d) \
        $(MPSC_QUEUE_OBJ:.o=.d) \
        $(MPSC_QUEUE_TEST_OBJ:.o=.d) \
        $(CHUNK_TASK_ENGINE_OBJ:.o=.d) \
-       $(CHUNK_TASK_ENGINE_TEST_OBJ:.o=.d) \n       $(CONTROL_CHANNEL_OBJ:.o=.d) \n       $(CONTROL_CHANNEL_TEST_OBJ:.o=.d)
+       $(CHUNK_TASK_ENGINE_TEST_OBJ:.o=.d) \n       $(CONTROL_CHANNEL_OBJ:.o=.d) \n       $(CONTROL_CHANNEL_TEST_OBJ:.o=.d) \n       $(RENDEZVOUS_LAYER_OBJ:.o=.d) \n       $(RENDEZVOUS_LAYER_TEST_OBJ:.o=.d)
 
 -include $(DEPS)
 
@@ -151,5 +160,6 @@ help:
 	@echo "make mpsc_queue_test - Build shared-memory MPSC queue test"
 	@echo "make chunk_task_engine_test - Build chunked-copy work-stealing test"
 	@echo "make control_channel_test - Build control-message transport (N^2 SPSC) test"
+	@echo "make rendezvous_layer_test - Build RTS/FIN rendezvous (GET) test"
 	@echo "make clean        - Remove build directory"
 
