@@ -230,6 +230,12 @@ public:
     bool is_active() const { return active_; }
     int node_rank() const { return node_rank_; }
     int node_size() const { return node_size_; }
+    // Read-only layout accessors (Stage 3): let a client verify that it shares
+    // this engine's ShmRegion and keep its buffers out of the engine layout
+    // [base_offset(), base_offset() + required_bytes(node_size(), config())).
+    const ShmRegion& region() const { return region_; }
+    std::ptrdiff_t base_offset() const { return base_offset_; }
+    const ChunkTaskConfig& config() const { return config_; }
     std::size_t in_flight() const;                       // this owner's posted, untested transfers
     std::uint64_t chunks_executed() const { return chunks_executed_; }
     std::uint64_t chunks_executed_for(int owner) const;  // chunks this process copied for `owner`
