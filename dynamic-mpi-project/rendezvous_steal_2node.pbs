@@ -1,0 +1,425 @@
+ -N rendezvous_steal_2node
+#PBS -q workq
+#PBS -l nodes=2:ppn=4
+#PBS -l walltime=00:15:00
+#PBS -j oe
+
+# ============================================================
+# Two-node verification:
+#   1. Stage 3 STEAL protocol
+#   2. Stage 2 GET regression
+#
+# Allocation: 2 nodes, 4 MPI ranks per node (8 total)
+# ============================================================
+
+PROJECT_DIR="/home/student4/BT2024199/Project/dynamic-mpi/dynamic-mpi-project"
+NP=8
+PPN=4
+
+die() {
+    echo "ERROR: $1"
+    echo "========== JOB FAILED (exit code $2) =========="
+    exit "$2"
+}
+
+echo "========== TWO-NODE STEAL VERIFICATION =========="
+date
+
+# ------------------------------------------------------------
+# Enter project directory
+# ------------------------------------------------------------
+
+cd "$PROJECT_DIR" || die "Cannot enter project directory" 1
+
+echo "========== JOB DETAILS =========="
+echo "Job ID: ${PBS_JOBID:-unknown}"
+echo "Job name: ${PBS_JOBNAME:-unknown}"
+echo "Node file: ${PBS_NODEFILE:-unknown}"
+echo "Project directory: $(pwd)"
+
+# ------------------------------------------------------------
+# Validate PBS allocation
+# ------------------------------------------------------------
+
+if [ -z "${PBS_NODEFILE:-}" ] || [ ! -r "$PBS_NODEFILE" ]; then
+    die "PBS_NODEFILE is missing or unreadable" 1
+fi
+
+echo "========== ALLOCATED NODES =========="
+sort "$PBS_NODEFILE" | uniq -c
+
+HOST_COUNT=$(sort -u "$PBS_NODEFILE" | wc -l)
+SLOT_COUNT=$(wc -l < "$PBS_NODEFILE")
+
+echo "Number of nodes: $HOST_COUNT"
+echo "Total MPI slots: $SLOT_COUNT"
+
+if [ "$HOST_COUNT" -ne 2 ]; then
+    die "Expected 2 nodes, found $HOST_COUNT" 1
+fi
+
+if [ "$SLOT_COUNT" -lt "$NP" ]; then
+    die "Expected at least $NP MPI slots, found $SLOT_COUNT" 1
+fi
+
+# ------------------------------------------------------------
+# Load MPI environment
+# ------------------------------------------------------------
+
+echo "========== MPI ENVIRONMENT =========="
+
+module load intel-2018 || die "Failed to load intel-2018 module" 1
+
+echo "mpicxx path:"
+which mpicxx
+
+echo "mpicxx version:"
+mpicxx --version
+
+echo "mpirun path:"
+which mpirun
+
+echo "mpirun version:"
+mpirun --version
+
+# ------------------------------------------------------------
+# Clean build
+# ------------------------------------------------------------
+
+echo "========== CLEAN BUILD =========="
+
+make clean || die "make clean failed" 1
+
+echo "========== REBUILDING TEST BINARIES =========="
+
+make rendezvous_steal_test rendezvous_layer_test 
+    || die "Compilation failed" 2
+
+echo "========== BUILD SUCCESSFUL =========="
+
+# ------------------------------------------------------------
+# Test execution helper
+# ------------------------------------------------------------
+
+run_test() {
+    local label="$1"
+    local binary="$2"
+
+    echo
+    echo "========== RUNNING $label =========="
+    echo "Command: mpirun -np $NP -ppn $PPN -f $PBS_NODEFILE ./build/$binary"
+
+    mpirun -np "$NP" -ppn "$PPN" -f "$PBS_NODEFILE" "./build/$binary"
+
+    local result=$?
+
+    echo "========== $label EXIT CODE: $result =========="
+
+    return "$result"
+}
+
+# ------------------------------------------------------------
+# Stage 3: STEAL protocol
+# ------------------------------------------------------------
+
+STEAL_RESULT=0
+
+run_test "STAGE 3 STEAL TEST" rendezvous_steal_test 
+    || STEAL_RESULT=$?
+
+# ------------------------------------------------------------
+# Stage 2: GET regression
+# Run even if the STEAL test fails, to retain regression results.
+# ------------------------------------------------------------
+
+GET_RESULT=0
+
+run_test "STAGE 2 GET REGRESSION" rendezvous_layer_test 
+    || GET_RESULT=$?
+
+# ------------------------------------------------------------
+# Final summary
+# ------------------------------------------------------------
+
+echo
+echo "========== TWO-NODE VERIFICATION SUMMARY =========="
+
+echo "STEAL test exit code: $STEAL_RESULT"
+echo "GET regression exit code: $GET_RESULT"
+
+date
+
+if [ "$STEAL_RESULT" -ne 0 ]; then
+    die "Stage 3 STEAL test failed" "$STEAL_RESULT"
+fi
+
+if [ "$GET_RESULT" -ne 0 ]; then
+    die "Stage 2 GET regression failed" "$GET_RESULT"
+fi
+
+echo
+echo "========== ALL TWO-NODE TESTS PASSED =========="
+
+exit 0
+#PBS -q workq
+##PBS -l nodes=2:ppn=4
+##PBS -l walltime=00:15:00
+##PBS -j oe
+#
+## ============================================================
+## Two-node verification:
+##   1. Stage 3 STEAL protocol
+##   2. Stage 2 GET regression
+##
+## Allocation: 2 nodes, 4 MPI ranks per node (8 total)
+## ============================================================
+#
+#PROJECT_DIR="/home/student4/BT2024199/Project/dynamic-mpi/dynamic-mpi-project"
+#NP=8
+#PPN=4
+#
+#die() {
+#    echo "ERROR: $1"
+#        echo "========== JOB FAILED (exit code $2) =========="
+#            exit "$2"
+#            }
+#
+#            echo "========== TWO-NODE STEAL VERIFICATION =========="
+#            date
+#
+#            # ------------------------------------------------------------
+#            # Enter project directory
+#            # ------------------------------------------------------------
+#
+#            cd "$PROJECT_DIR" || die "Cannot enter project directory" 1
+#
+#            echo "========== JOB DETAILS =========="
+#            echo "Job ID: ${PBS_JOBID:-unknown}"
+#            echo "Job name: ${PBS_JOBNAME:-unknown}"
+#            echo "Node file: ${PBS_NODEFILE:-unknown}"
+#            echo "Project directory: $(pwd)"
+#
+#            # ------------------------------------------------------------
+#            # Validate PBS allocation
+#            # ------------------------------------------------------------
+#
+#            if [ -z "${PBS_NODEFILE:-}" ] || [ ! -r "$PBS_NODEFILE" ]; then
+#                die "PBS_NODEFILE is missing or unreadable" 1
+#                fi
+#
+#                echo "========== ALLOCATED NODES =========="
+#                sort "$PBS_NODEFILE" | uniq -c
+#
+#                HOST_COUNT=$(sort -u "$PBS_NODEFILE" | wc -l)
+#                SLOT_COUNT=$(wc -l < "$PBS_NODEFILE")
+#
+#                echo "Number of nodes: $HOST_COUNT"
+#                echo "Total MPI slots: $SLOT_COUNT"
+#
+#                if [ "$HOST_COUNT" -ne 2 ]; then
+#                    die "Expected 2 nodes, found $HOST_COUNT" 1
+#                    fi
+#
+#                    if [ "$SLOT_COUNT" -lt "$NP" ]; then
+#                        die "Expected at least $NP MPI slots, found $SLOT_COUNT" 1
+#                        fi
+#
+#                        # ------------------------------------------------------------
+#                        # Load MPI environment
+#                        # ------------------------------------------------------------
+#
+#                        echo "========== MPI ENVIRONMENT =========="
+#
+#                        module load intel-2018 || die "Failed to load intel-2018 module" 1
+#
+#                        echo "mpicxx path:"
+#                        which mpicxx
+#
+#                        echo "mpicxx version:"
+#                        mpicxx --version
+#
+#                        echo "mpirun path:"
+#                        which mpirun
+#
+#                        echo "mpirun version:"
+#                        mpirun --version
+#
+#                        # ------------------------------------------------------------
+#                        # Clean build
+#                        # ------------------------------------------------------------
+#
+#                        echo "========== CLEAN BUILD =========="
+#
+#                        make clean || die "make clean failed" 1
+#
+#                        echo "========== REBUILDING TEST BINARIES =========="
+#
+#                        make rendezvous_steal_test rendezvous_layer_test 
+#                            || die "Compilation failed" 2
+#
+#                            echo "========== BUILD SUCCESSFUL =========="
+#
+#                            # ------------------------------------------------------------
+#                            # Test execution helper
+#                            # ------------------------------------------------------------
+#
+#                            run_test() {
+#                                local label="$1"
+#                                    local binary="$2"
+#
+#                                        echo
+#                                            echo "========== RUNNING $label =========="
+#                                                echo "Command: mpirun -np $NP -ppn $PPN -f $PBS_NODEFILE ./build/$binary"
+#
+#                                                    mpirun -np "$NP" -ppn "$PPN" -f "$PBS_NODEFILE" "./build/$binary"
+#
+#                                                        local result=$?
+#
+#                                                            echo "========== $label EXIT CODE: $result =========="
+#
+#                                                                return "$result"
+#                                                                }
+#
+#                                                                # ------------------------------------------------------------
+#                                                                # Stage 3: STEAL protocol
+#                                                                # ------------------------------------------------------------
+#
+#                                                                STEAL_RESULT=0
+#
+#                                                                run_test "STAGE 3 STEAL TEST" rendezvous_steal_test 
+#                                                                    || STEAL_RESULT=$?
+#
+#                                                                    # ------------------------------------------------------------
+#                                                                    # Stage 2: GET regression
+#                                                                    # Run even if the STEAL test fails, to retain regression results.
+#                                                                    # ------------------------------------------------------------
+#
+#                                                                    GET_RESULT=0
+#
+#                                                                    run_test "STAGE 2 GET REGRESSION" rendezvous_layer_test 
+#                                                                        || GET_RESULT=$?
+#
+#                                                                        # ------------------------------------------------------------
+#                                                                        # Final summary
+#                                                                        # ------------------------------------------------------------
+#
+#                                                                        echo
+#                                                                        echo "========== TWO-NODE VERIFICATION SUMMARY =========="
+#
+#                                                                        echo "STEAL test exit code: $STEAL_RESULT"
+#                                                                        echo "GET regression exit code: $GET_RESULT"
+#
+#                                                                        date
+#
+#                                                                        if [ "$STEAL_RESULT" -ne 0 ]; then
+#                                                                            die "Stage 3 STEAL test failed" "$STEAL_RESULT"
+#                                                                            fi
+#
+#                                                                            if [ "$GET_RESULT" -ne 0 ]; then
+#                                                                                die "Stage 2 GET regression failed" "$GET_RESULT"
+#                                                                                fi
+#
+#                                                                                echo
+#                                                                                echo "========== ALL TWO-NODE TESTS PASSED =========="
+#
+#                                                                                exit 0
+#PBS -l nodes=2:ppn=4
+#PBS -l walltime=00:15:00
+#PBS -j oe
+
+echo "========== TWO-NODE STEAL VERIFICATION =========="
+
+cd /home/student4/BT2024199/Project/dynamic-mpi/dynamic-mpi-project || exit 1
+
+echo "========== JOB DETAILS =========="
+echo "Job ID: $PBS_JOBID"
+echo "Node file: $PBS_NODEFILE"
+
+echo "========== ALLOCATED NODES =========="
+sort "$PBS_NODEFILE" | uniq -c
+
+HOST_COUNT=$(sort -u "$PBS_NODEFILE" | wc -l)
+
+if [ "$HOST_COUNT" -ne 2 ]; then
+    echo "ERROR: Expected 2 nodes, got $HOST_COUNT"
+    exit 1
+fi
+
+module load intel-2018
+
+echo "========== COMPILER =========="
+which mpicxx
+mpicxx --version
+
+echo "========== COMPILING =========="
+make rendezvous_steal_test rendezvous_layer_test || exit 1
+
+echo "========== TWO-NODE NORMAL STEAL TEST =========="
+mpirun -np 8 -ppn 4 -f "$PBS_NODEFILE" ./build/rendezvous_steal_test
+STEAL_RESULT=$?
+
+echo "STEAL TEST EXIT CODE: $STEAL_RESULT"
+
+if [ "$STEAL_RESULT" -ne 0 ]; then
+    echo "ERROR: Two-node STEAL test failed"
+    exit "$STEAL_RESULT"
+fi
+
+echo "========== TWO-NODE STAGE 2 REGRESSION =========="
+mpirun -np 8 -ppn 4 -f "$PBS_NODEFILE" ./build/rendezvous_layer_test
+GET_RESULT=$?
+
+echo "STAGE 2 TEST EXIT CODE: $GET_RESULT"
+
+if [ "$GET_RESULT" -ne 0 ]; then
+    echo "ERROR: Stage 2 regression failed"
+    exit "$GET_RESULT"
+fi
+
+echo "========== TWO-NODE VERIFICATION PASSED =========="
+
+exit 0
+#PBS -N allreduce_manual
+#PBS -l nodes=1:ppn=20
+#PBS -l walltime=00:30:00
+#PBS -j oe
+
+set -e
+
+PROJECT_DIR="/home/student4/BT2024199/mpi_allreduce"
+
+echo "========== COMPUTE NODE =========="
+hostname
+cat "$PBS_NODEFILE"
+echo "Allocated slots: $(wc -l < "$PBS_NODEFILE")"
+
+module load intel-2018
+
+echo ""
+echo "========== MPI ENVIRONMENT =========="
+which mpicc
+which mpirun
+
+cd "$PROJECT_DIR"
+
+echo ""
+echo "========== BUILD =========="
+make clean
+make benchmark
+
+echo ""
+echo "========== 2 MPI RANKS =========="
+export OMP_NUM_THREADS=10
+export OMP_DYNAMIC=FALSE
+mpirun -np 2 ./mpi-allreduce-shm-bench 100 20
+
+echo ""
+echo "========== 4 MPI RANKS =========="
+export OMP_NUM_THREADS=5
+mpirun -np 4 ./mpi-allreduce-shm-bench 100 20
+
+echo ""
+echo "========== COMPLETED =========="
+
+
+
