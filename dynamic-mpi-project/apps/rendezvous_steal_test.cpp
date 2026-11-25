@@ -75,9 +75,17 @@ struct TestReport {
     }
 };
 
-unsigned long long sum_all(unsigned long long v) {   // collective
+unsigned long long sum_all(unsigned long long v) {   // collective over MPI_COMM_WORLD
     unsigned long long out = 0;
     MPI_Allreduce(&v, &out, 1, MPI_UNSIGNED_LONG_LONG, MPI_SUM, MPI_COMM_WORLD);
+    return out;
+}
+
+// Collective over `comm` (the node communicator for node-local engine totals:
+// every node runs its own engine, and node-local ranks repeat on each node).
+unsigned long long sum_node(unsigned long long v, MPI_Comm comm) {
+    unsigned long long out = 0;
+    MPI_Allreduce(&v, &out, 1, MPI_UNSIGNED_LONG_LONG, MPI_SUM, comm);
     return out;
 }
 
@@ -186,9 +194,10 @@ int close_trio(Trio& t, double drain = 10.0, double barrier = 60.0) {
     return result;
 }
 
-// COLLECTIVE: chunks executed FOR `owner`, summed over every rank.
-unsigned long long executed_for(const ChunkTaskEngine& eng, int owner) {
-    return sum_all(eng.chunks_executed_for(owner));
+// COLLECTIVE over node_comm: chunks executed FOR node-local `owner`, summed
+// over the ranks of THIS node (the ranks sharing this engine).
+unsigned long long executed_for(const ChunkTaskEngine& eng, int owner, MPI_Comm node_comm) {
+    return sum_node(eng.chunks_executed_for(owner), node_comm);
 }
 
 // ---- Engine layout as documented in chunk_task_engine.hpp (TEST-ONLY) ----
@@ -440,7 +449,7 @@ int main(int argc, char* argv[]) {
                 ok = false;
             }
             MPI_Barrier(nc);
-            for (int o = 0; o < n; ++o) ok = (executed_for(*t.eng, o) == 65) && ok;   // exactly once per owner
+            for (int o = 0; o < n; ++o) ok = (executed_for(*t.eng, o, nc) == 65) && ok;   // exactly once per owner
             try {
                 SendRequest s;
                 RecvRequest r;
@@ -564,8 +573,11 @@ int main(int argc, char* argv[]) {
                 MPI_Barrier(nc);   // nobody refills a source another rank may still read
             }
             unsigned long long executed = 0;
-            for (int o = 0; o < n; ++o) executed += executed_for(*t.eng, o);
-            ok = (executed == sum_all(my_chunks)) && ok;
+            // Node-local on BOTH sides: every transfer is intra-node (src/dest
+            // are node-local ranks), so this node's engine executed exactly the
+            // chunks this node's ranks sent.
+            for (int o = 0; o < n; ++o) executed += executed_for(*t.eng, o, nc);
+            ok = (executed == sum_node(my_chunks, nc)) && ok;
             ok = ok && rv.steal_completed() == static_cast<std::uint64_t>(kIterations * 6 * n) &&
                  t.eng->stale_handles() == 0 && t.eng->invalid_handles() == 0 && rv.steal_post_refusals() == 0 &&
                  rv.protocol_errors() == 0 && t.ch->rejected_total() == 0;
@@ -626,7 +638,7 @@ int main(int argc, char* argv[]) {
             }
             MPI_Barrier(nc);
             unsigned long long executed = 0;
-            for (int o = 0; o < n; ++o) executed += executed_for(*t.eng, o);
+            for (int o = 0; o < n; ++o) executed += executed_for(*t.eng, o, nc);
             ok = (executed == static_cast<unsigned long long>(n) * 3 * (len / 1024)) && ok;   // no duplicate task set
             ok = (close_trio(t) == 0) && ok;
             report.record("4. table_slots=1: 2 deferrals, 2 deferred publications, in_flight<=1, one FIN each, no duplicates",
@@ -667,7 +679,7 @@ int main(int argc, char* argv[]) {
                 ok = false;
             }
             MPI_Barrier(nc);
-            for (int o = 0; o < n; ++o) ok = (executed_for(*t.eng, o) == 0) && ok;   // nothing ever published
+            for (int o = 0; o < n; ++o) ok = (executed_for(*t.eng, o, nc) == 0) && ok;   // nothing ever published
             ok = (close_trio(t) == 0) && ok;
             report.record("5. Invalid sender source -> kErrBadSource both sides, never published, dst untouched", ok);
         }
