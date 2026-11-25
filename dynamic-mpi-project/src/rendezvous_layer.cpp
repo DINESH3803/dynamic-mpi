@@ -1,4 +1,5 @@
 #include "rendezvous_layer.hpp"
+#include "chunk_task_engine.hpp"
 #include "shm_region.hpp"
 
 #include <cstring>
@@ -7,7 +8,7 @@
 #include <sstream>
 
 // ==============================================================================
-// Implementation: RendezvousLayer (Stage 2 - GET only)
+// Implementation: RendezvousLayer (Stage 2 GET; Stage 3 STEAL in progress)
 // ==============================================================================
 
 namespace {
@@ -25,15 +26,28 @@ bool timed_out(double timeout_sec, double since) {
 // ------------------------------------------------------------------------------
 
 RendezvousLayer::RendezvousLayer(ShmRegion& region, ControlChannel& channel, const RendezvousConfig& config)
+    : RendezvousLayer(region, channel, static_cast<ChunkTaskEngine*>(nullptr), config) {}
+
+RendezvousLayer::RendezvousLayer(ShmRegion& region, ControlChannel& channel, ChunkTaskEngine& engine,
+                                 const RendezvousConfig& config)
+    : RendezvousLayer(region, channel, &engine, config) {}
+
+RendezvousLayer::RendezvousLayer(ShmRegion& region, ControlChannel& channel, ChunkTaskEngine* engine,
+                                 const RendezvousConfig& config)
     : region_(region),
       channel_(channel),
       config_(config),
       node_rank_(-1),
       node_size_(0),
       state_(kLayerInactive),
+      engine_(engine),
       arena_bytes_(0),
       channel_lo_(0),
       channel_hi_(0),
+      engine_lo_(0),
+      engine_hi_(0),
+      staging_base_(0),
+      staging_stride_(0),
       unexpected_capacity_(0),
       serial_counter_(0),
       barrier_req_(MPI_REQUEST_NULL),
@@ -47,10 +61,28 @@ RendezvousLayer::RendezvousLayer(ShmRegion& region, ControlChannel& channel, con
       duplicate_rts_(0),
       push_failures_(0),
       reply_push_retries_(0),
-      unconsumed_at_shutdown_(0) {
-    if (config.protocol != kProtoGet) {
-        throw std::invalid_argument(
-            "RendezvousLayer: only the GET protocol is supported in Stage 2 (COOP and STEAL are not implemented)");
+      unconsumed_at_shutdown_(0),
+      steal_posted_(0),
+      steal_completed_(0),
+      steal_bytes_(0),
+      steal_deferrals_(0),
+      steal_deferred_posted_(0),
+      steal_post_refusals_(0),
+      steal_failed_(0),
+      engine_faults_(0) {
+    engine_faulted_ = false;
+    if (config.protocol == kProtoSteal) {
+        if (engine == nullptr) {
+            throw std::invalid_argument("RendezvousLayer: STEAL requires a ChunkTaskEngine (four-argument constructor)");
+        }
+        if (config.staging_stride == 0) {
+            throw std::invalid_argument("RendezvousLayer: STEAL requires per-rank staging segments (staging_stride > 0)");
+        }
+        if (config.chunk_bytes < 1 || config.task_budget < 1) {
+            throw std::invalid_argument("RendezvousLayer: chunk_bytes and task_budget must be >= 1");
+        }
+    } else if (config.protocol != kProtoGet) {
+        throw std::invalid_argument("RendezvousLayer: unsupported protocol (COOP is not implemented)");
     }
     const std::uint64_t kMaxTable = static_cast<std::uint64_t>(std::numeric_limits<std::uint32_t>::max());
     if (config.max_sends < 1 || config.max_sends > kMaxTable || config.max_recvs < 1 ||
@@ -97,11 +129,67 @@ RendezvousLayer::RendezvousLayer(ShmRegion& region, ControlChannel& channel, con
         throw std::invalid_argument("RendezvousLayer: ControlChannel has already carried traffic (use a fresh channel)");
     }
 
+    const std::uint64_t A = static_cast<std::uint64_t>(region.arena_size());
+    const std::uint64_t ch_lo = static_cast<std::uint64_t>(channel.base_offset());
+    const std::uint64_t ch_hi = ch_lo + static_cast<std::uint64_t>(channel_bytes);
+    const std::uint64_t n_ranks = static_cast<std::uint64_t>(channel.node_size());
+
+    // Engine (optional). Its region and layout are checked with the read-only
+    // accessors; the engine must be idle so that every in-flight transfer the
+    // layer later observes is one it posted itself.
+    std::uint64_t en_lo = 0;
+    std::uint64_t en_hi = 0;
+    if (engine != nullptr) {
+        if (!engine->is_active()) {
+            throw std::invalid_argument("RendezvousLayer: ChunkTaskEngine is not active");
+        }
+        if (&engine->region() != &region) {
+            throw std::invalid_argument("RendezvousLayer: ChunkTaskEngine does not belong to this ShmRegion");
+        }
+        if (engine->node_rank() != region.node_rank() || engine->node_size() != region.node_size()) {
+            throw std::invalid_argument("RendezvousLayer: ChunkTaskEngine and ShmRegion disagree on node rank/size");
+        }
+        const std::size_t engine_bytes = ChunkTaskEngine::required_bytes(engine->node_size(), engine->config());
+        if (engine->base_offset() < 0 || !region.contains(engine->base_offset(), engine_bytes)) {
+            throw std::invalid_argument("RendezvousLayer: ChunkTaskEngine layout is not inside this ShmRegion");
+        }
+        en_lo = static_cast<std::uint64_t>(engine->base_offset());
+        en_hi = en_lo + static_cast<std::uint64_t>(engine_bytes);
+        if (overlap(en_lo, en_hi - en_lo, ch_lo, ch_hi - ch_lo)) {
+            throw std::invalid_argument("RendezvousLayer: ChunkTaskEngine and ControlChannel layouts overlap");
+        }
+        if (engine->in_flight() != 0 || engine->stale_handles() != 0 || engine->invalid_handles() != 0) {
+            throw std::invalid_argument("RendezvousLayer: ChunkTaskEngine is not idle (in-flight transfers or bad handles)");
+        }
+    }
+
+    // Staging segments (optional for GET, required for STEAL): N segments of
+    // `stride` bytes from `staging_base`, inside the arena and disjoint from
+    // both reserved layouts. Checked overflow-safely.
+    if (config.staging_stride != 0) {
+        if (config.staging_base < 0) {
+            throw std::invalid_argument("RendezvousLayer: negative staging_base");
+        }
+        const std::uint64_t base = static_cast<std::uint64_t>(config.staging_base);
+        const std::uint64_t stride = static_cast<std::uint64_t>(config.staging_stride);
+        if (base > A || stride > (A - base) / n_ranks) {
+            throw std::invalid_argument("RendezvousLayer: staging segments do not fit in the arena");
+        }
+        const std::uint64_t span = stride * n_ranks;
+        if (overlap(base, span, ch_lo, ch_hi - ch_lo) || (en_hi > en_lo && overlap(base, span, en_lo, en_hi - en_lo))) {
+            throw std::invalid_argument("RendezvousLayer: staging segments overlap a reserved layout");
+        }
+        staging_base_ = base;
+        staging_stride_ = stride;
+    }
+
     node_rank_ = channel.node_rank();
     node_size_ = channel.node_size();
-    arena_bytes_ = static_cast<std::uint64_t>(region.arena_size());
-    channel_lo_ = static_cast<std::uint64_t>(channel.base_offset());
-    channel_hi_ = channel_lo_ + static_cast<std::uint64_t>(channel_bytes);
+    arena_bytes_ = A;
+    channel_lo_ = ch_lo;
+    channel_hi_ = ch_hi;
+    engine_lo_ = en_lo;
+    engine_hi_ = en_hi;
     // Credits bound the in-order unmatched RTS per source to credits_per_peer.
     unexpected_capacity_ = channel.config().credits_per_peer * static_cast<std::size_t>(node_size_);
 
@@ -153,12 +241,28 @@ bool RendezvousLayer::overlap(std::uint64_t a, std::uint64_t la, std::uint64_t b
     return a < b + lb && b < a + la;
 }
 
-// Non-throwing check of a range taken from another process's record.
-bool RendezvousLayer::range_valid(std::uint64_t off, std::uint64_t bytes) const {
+// [off, off+bytes) (already inside the arena) avoids the ControlChannel layout
+// and, when an engine is attached, the ChunkTaskEngine layout.
+bool RendezvousLayer::outside_reserved(std::uint64_t off, std::uint64_t bytes) const {
+    if (overlap(off, bytes, channel_lo_, channel_hi_ - channel_lo_)) return false;
+    if (engine_hi_ > engine_lo_ && overlap(off, bytes, engine_lo_, engine_hi_ - engine_lo_)) return false;
+    return true;
+}
+
+// [off, off+bytes) (already inside the arena) lies inside `owner`'s staging
+// segment; always true when segments are disabled.
+bool RendezvousLayer::inside_segment(std::uint64_t off, std::uint64_t bytes, int owner) const {
+    if (staging_stride_ == 0) return true;
+    const std::uint64_t lo = staging_base_ + static_cast<std::uint64_t>(owner) * staging_stride_;
+    return off >= lo && bytes <= staging_stride_ && off - lo <= staging_stride_ - bytes;
+}
+
+// Non-throwing check of a range taken from `owner`'s record (RTS source).
+bool RendezvousLayer::range_valid(std::uint64_t off, std::uint64_t bytes, int owner) const {
     // `off` is the int64 record field reinterpreted: a negative value becomes
     // >= 2^63 and fails the bound below. bytes <= A - off cannot overflow.
     if (bytes == 0 || off > arena_bytes_ || bytes > arena_bytes_ - off) return false;
-    return !overlap(off, bytes, channel_lo_, channel_hi_ - channel_lo_);
+    return outside_reserved(off, bytes) && inside_segment(off, bytes, owner);
 }
 
 void RendezvousLayer::validate_range(std::ptrdiff_t off, std::size_t bytes, const char* what) const {
@@ -179,6 +283,14 @@ void RendezvousLayer::validate_range(std::ptrdiff_t off, std::size_t bytes, cons
     if (overlap(o, b, channel_lo_, channel_hi_ - channel_lo_)) {
         throw std::invalid_argument(std::string("RendezvousLayer: ") + what + " range overlaps the ControlChannel layout");
     }
+    if (engine_hi_ > engine_lo_ && overlap(o, b, engine_lo_, engine_hi_ - engine_lo_)) {
+        throw std::invalid_argument(std::string("RendezvousLayer: ") + what +
+                                    " range overlaps the ChunkTaskEngine layout");
+    }
+    if (!inside_segment(o, b, node_rank_)) {
+        throw std::invalid_argument(std::string("RendezvousLayer: ") + what +
+                                    " range is not inside this rank's staging segment");
+    }
 }
 
 // ------------------------------------------------------------------------------
@@ -193,8 +305,7 @@ PostResult RendezvousLayer::try_isend(int dest, std::uint32_t tag, std::ptrdiff_
     const std::uint64_t src = static_cast<std::uint64_t>(src_offset);
     for (std::size_t i = 0; i < recvs_.size(); ++i) {
         const RecvEntry& r = recvs_[i];
-        if ((r.state == kRecvPosted || r.state == kRecvMatched || r.state == kRecvFinPending) &&
-            overlap(src, bytes, r.dst_offset, r.bytes)) {
+        if (recv_active(r.state) && overlap(src, bytes, r.dst_offset, r.bytes)) {
             throw std::invalid_argument("RendezvousLayer: send source overlaps an active receive destination");
         }
     }
@@ -260,8 +371,7 @@ PostResult RendezvousLayer::try_irecv(int source, std::uint32_t tag, std::ptrdif
     const std::uint64_t dst = static_cast<std::uint64_t>(dst_offset);
     for (std::size_t i = 0; i < recvs_.size(); ++i) {
         const RecvEntry& r = recvs_[i];
-        if ((r.state == kRecvPosted || r.state == kRecvMatched || r.state == kRecvFinPending) &&
-            overlap(dst, bytes, r.dst_offset, r.bytes)) {
+        if (recv_active(r.state) && overlap(dst, bytes, r.dst_offset, r.bytes)) {
             throw std::invalid_argument("RendezvousLayer: receive destination overlaps an active receive");
         }
     }
@@ -292,6 +402,7 @@ PostResult RendezvousLayer::try_irecv(int source, std::uint32_t tag, std::ptrdif
     e.bytes = static_cast<std::uint64_t>(bytes);
     e.error = kRvOk;
     e.protocol = kProtoNone;
+    e.want = config_.protocol;   // receiver-side choice (forced; no dynamic selection yet)
     req.index = static_cast<std::uint32_t>(idx);
     req.serial = e.serial;
 
@@ -313,21 +424,47 @@ PostResult RendezvousLayer::try_irecv(int source, std::uint32_t tag, std::ptrdif
 void RendezvousLayer::match(std::size_t recv_index, int source, std::uint32_t slot, std::uint64_t generation,
                             std::uint64_t src_offset, std::uint64_t bytes) {
     RecvEntry& e = recvs_[recv_index];
-    (void)source;
     e.slot = slot;
     e.generation = generation;
     e.rts_src_offset = src_offset;
     e.rts_bytes = bytes;
     if (bytes != e.bytes) {
         e.error = kErrSizeMismatch;
-    } else if (!range_valid(src_offset, bytes)) {
+    } else if (!range_valid(src_offset, bytes, source)) {   // incl. the SENDER's staging segment
         e.error = kErrBadSource;
     } else if (overlap(src_offset, bytes, e.dst_offset, e.bytes)) {
         e.error = kErrOverlap;
+    } else if (e.want == kProtoSteal &&
+               (bytes - 1) / config_.chunk_bytes + 1 > ChunkTaskEngine::kMaxChunksPerTransfer) {
+        e.error = kErrEngine;   // more chunks than one engine transfer can hold
     } else {
         e.error = kRvOk;
     }
     e.state = kRecvMatched;
+    // A valid STEAL receive is NOT published here: it joins the deferred FIFO
+    // and is published by post_deferred() when the engine has a free slot.
+    if (e.want == kProtoSteal && e.error == kRvOk) {
+        deferred_.push_back(static_cast<std::uint32_t>(recv_index));
+    }
+}
+
+// Engine per-owner overlap rules (chunk_task_engine.cpp, try_post_transfer),
+// checked against this layer's published transfers immediately before
+// publication, so the engine never has to refuse a layer transfer.
+RendezvousError RendezvousLayer::steal_publication_check(std::size_t recv_index) const {
+    const RecvEntry& e = recvs_[recv_index];
+    for (std::size_t j = 0; j < recvs_.size(); ++j) {
+        if (j == recv_index) continue;
+        const RecvEntry& o = recvs_[j];
+        if (recv_active(o.state) && overlap(e.rts_src_offset, e.bytes, o.dst_offset, o.bytes)) {
+            return kErrOverlap;   // new source vs another destination
+        }
+        if ((o.state == kRecvStealPosted || o.state == kRecvStealFailed) &&
+            overlap(e.dst_offset, e.bytes, o.rts_src_offset, o.bytes)) {
+            return kErrOverlap;   // new destination vs an in-flight source
+        }
+    }
+    return kRvOk;
 }
 
 // ------------------------------------------------------------------------------
@@ -352,10 +489,11 @@ std::size_t RendezvousLayer::progress() {
         }
     }
 
-    // 2. Matched receives: GET (single memcpy) or nothing for an error; then FIN.
+    // 2. Matched receives that are NOT valid STEAL (those wait in deferred_):
+    //    GET (single memcpy) or nothing for an error -> FIN pending.
     for (std::size_t i = 0; i < recvs_.size(); ++i) {
         RecvEntry& e = recvs_[i];
-        if (e.state == kRecvMatched) {
+        if (e.state == kRecvMatched && !(e.want == kProtoSteal && e.error == kRvOk)) {
             if (e.error == kRvOk) {
                 const void* src = region_.ptr_from_offset(static_cast<std::ptrdiff_t>(e.rts_src_offset),
                                                           static_cast<std::size_t>(e.bytes));
@@ -372,8 +510,26 @@ std::size_t RendezvousLayer::progress() {
             e.state = kRecvFinPending;
             ++work;
         }
+    }
+
+    // 3. Engine execution (workers): own SPMC queue first, then remote queues
+    //    (S11). Executes chunks of ANY owner; says nothing about completion.
+    work += engine_progress();
+
+    // 4. Confirmed completion of published STEAL transfers (test_transfer).
+    work += check_steal_completions();
+
+    // 5. Publish deferred STEAL receives while the engine has a free slot
+    //    (capacity freed in step 4 is usable immediately).
+    work += post_deferred();
+
+    // 6. FIN for every receive whose outcome is decided: success only for GET
+    //    (copied above) or CONFIRMED STEAL completion (step 4); error-FIN only
+    //    when no task was ever published for the receive.
+    for (std::size_t i = 0; i < recvs_.size(); ++i) {
+        RecvEntry& e = recvs_[i];
         if (e.state == kRecvFinPending) {
-            const std::uint32_t proto = (e.error == kRvOk) ? static_cast<std::uint32_t>(kProtoGet)
+            const std::uint32_t proto = (e.error == kRvOk) ? static_cast<std::uint32_t>(e.protocol)
                                                            : kProtoErrorBase + static_cast<std::uint32_t>(e.error);
             if (push_fin(e.source, e.slot, e.generation, proto, e.participants, e.dst_offset)) {
                 if (e.error != kRvOk) ++error_fins_sent_;
@@ -385,7 +541,7 @@ std::size_t RendezvousLayer::progress() {
         }
     }
 
-    // 3. Error-FINs owed after a sequence fault (no receive involved).
+    // 7. Error-FINs owed after a sequence fault (no receive involved).
     for (std::size_t k = orphans_.size(); k > 0; --k) {
         const OrphanFin o = orphans_.front();
         orphans_.pop_front();
@@ -400,13 +556,191 @@ std::size_t RendezvousLayer::progress() {
     return work;
 }
 
+// ------------------------------------------------------------------------------
+// STEAL: engine interaction. Every ChunkTaskEngine call is made from one of
+// the three functions below; each latches engine_faulted_ BEFORE rethrowing.
+// ------------------------------------------------------------------------------
+
+// Latches the fault: from now on the engine is never called again by this
+// layer. Every published transfer may still have tasks queued or running that
+// read its source, so each one is held forever (kRecvStealFailed): no FIN,
+// the sender's record and credit stay allocated, and shutdown reports the
+// engine slot as in flight. Deferred (unpublished) receives are answered with
+// error-FIN kErrEngine by post_deferred(): no task of theirs exists.
+void RendezvousLayer::latch_engine_fault(const char* where, const char* what) {
+    if (!engine_faulted_) {
+        std::cerr << "[RendezvousLayer] node rank " << node_rank_ << ": ENGINE FAULT in " << where << ": " << what
+                  << " - engine latched as faulted; published STEAL transfers are held without FIN\n";
+    }
+    engine_faulted_ = true;
+    ++engine_faults_;
+    for (std::size_t i = 0; i < recvs_.size(); ++i) {
+        if (recvs_[i].state == kRecvStealPosted) {
+            recvs_[i].state = kRecvStealFailed;
+            ++steal_failed_;
+        }
+    }
+}
+
+// EXECUTION: run up to task_budget chunk tasks (own queue first, then remote).
+std::size_t RendezvousLayer::engine_progress() {
+    if (engine_ == nullptr || engine_faulted_) return 0;
+    try {
+        return engine_->progress(config_.task_budget);
+    } catch (const std::exception& ex) {
+        latch_engine_fault("ChunkTaskEngine::progress", ex.what());
+        throw;
+    } catch (...) {
+        latch_engine_fault("ChunkTaskEngine::progress", "unknown exception");
+        throw;
+    }
+}
+
+// CONFIRMATION: test_transfer() == true means cmpl_counter == n_chunks was
+// observed with an ACQUIRE load that synchronizes with every worker's
+// acq_rel fetch_add, so every chunk copy (reads of the sender's source,
+// writes of our destination) happens-before this point and before the FIN
+// pushed later in progress(). Publication or execution alone never gets here.
+std::size_t RendezvousLayer::check_steal_completions() {
+    if (engine_ == nullptr || engine_faulted_) return 0;
+    std::size_t work = 0;
+    for (std::size_t i = 0; i < recvs_.size(); ++i) {
+        RecvEntry& e = recvs_[i];
+        if (e.state != kRecvStealPosted) continue;
+        TransferId id;
+        id.slot = e.xfer_slot;
+        id.generation = e.xfer_gen;
+        TransferStatus st;
+        bool done = false;
+        try {
+            done = engine_->test_transfer(id, &st);
+        } catch (const std::exception& ex) {
+            // Completion cannot be established (stale id, or counter beyond
+            // n_chunks): workers may still touch the source. Hold it.
+            latch_engine_fault("ChunkTaskEngine::test_transfer", ex.what());
+            throw;
+        } catch (...) {
+            latch_engine_fault("ChunkTaskEngine::test_transfer", "unknown exception");
+            throw;
+        }
+        if (!done) continue;
+        // CONFIRMED. The engine has released its slot; the layer forgets the id.
+        e.protocol = kProtoSteal;
+        e.participants = st.participants;   // popcount of the participation bitset (S11)
+        e.state = kRecvFinPending;
+        ++steal_completed_;
+        steal_bytes_ += e.bytes;
+        ++work;
+    }
+    return work;
+}
+
+// PUBLICATION: deferred FIFO head first, only while the gate is open:
+//   engine.in_flight() < engine.config().table_slots
+// The layer has exclusive use of the engine's posting side, so an open gate
+// means try_post_transfer() finds a free slot. Each receive is published at
+// most once: it leaves deferred_ in the same step that decides its fate.
+std::size_t RendezvousLayer::post_deferred() {
+    if (engine_ == nullptr) return 0;
+    std::size_t work = 0;
+    while (!deferred_.empty()) {
+        const std::uint32_t idx = deferred_.front();
+        RecvEntry& e = recvs_[idx];
+        if (engine_faulted_) {
+            // Never published: no task can touch the source. Safe error-FIN.
+            deferred_.pop_front();
+            e.error = kErrEngine;
+            e.protocol = kProtoNone;
+            e.participants = 0;
+            e.state = kRecvFinPending;
+            ++work;
+            continue;
+        }
+        if (engine_->in_flight() >= engine_->config().table_slots) {
+            if (!e.deferred) {
+                e.deferred = 1;
+                ++steal_deferrals_;
+            }
+            break;   // FIFO: everything behind the head waits as well
+        }
+        const RendezvousError pre = steal_publication_check(idx);
+        if (pre != kRvOk) {
+            deferred_.pop_front();
+            e.error = pre;
+            e.state = kRecvFinPending;   // nothing published: error-FIN is safe
+            ++work;
+            continue;
+        }
+        const std::size_t in_flight_before = engine_->in_flight();
+        TransferId id;
+        bool published = false;
+        try {
+            published = engine_->try_post_transfer(static_cast<std::ptrdiff_t>(e.rts_src_offset),
+                                                   static_cast<std::ptrdiff_t>(e.dst_offset),
+                                                   static_cast<std::size_t>(e.bytes), config_.chunk_bytes, id);
+        } catch (const std::exception& ex) {
+            deferred_.pop_front();
+            if (engine_->in_flight() == in_flight_before) {
+                // Validation failure BEFORE any slot or task was published
+                // (try_post_transfer takes a slot before pushing any task, so
+                // an unchanged in_flight() proves nothing exists). Engine is
+                // not faulted (checked above): error-FIN is safe.
+                std::cerr << "[RendezvousLayer] node rank " << node_rank_
+                          << ": engine refused a STEAL transfer before publication: " << ex.what() << "\n";
+                e.error = kErrEngine;
+                e.protocol = kProtoNone;
+                e.state = kRecvFinPending;
+                ++work;
+                continue;
+            }
+            // A slot (and possibly some tasks) was published before the throw;
+            // id was filled in before the first push. Hold the receive.
+            e.xfer_slot = id.slot;
+            e.xfer_gen = id.generation;
+            e.state = kRecvStealPosted;   // turned into kRecvStealFailed by the latch
+            latch_engine_fault("ChunkTaskEngine::try_post_transfer (after publication)", ex.what());
+            throw;
+        } catch (...) {
+            deferred_.pop_front();
+            e.state = kRecvStealPosted;   // unknown extent: conservatively held
+            latch_engine_fault("ChunkTaskEngine::try_post_transfer", "unknown exception");
+            throw;
+        }
+        if (!published) {
+            // Gate said a slot was free but the engine disagreed (exclusive-use
+            // contract broken?). Nothing was published; keep waiting.
+            ++steal_post_refusals_;
+            if (!e.deferred) {
+                e.deferred = 1;
+                ++steal_deferrals_;
+            }
+            break;
+        }
+        deferred_.pop_front();
+        e.xfer_slot = id.slot;
+        e.xfer_gen = id.generation;
+        e.state = kRecvStealPosted;   // PUBLISHED (not complete)
+        ++steal_posted_;
+        if (e.deferred) ++steal_deferred_posted_;
+        ++work;
+    }
+    return work;
+}
+
 std::size_t RendezvousLayer::progress_noexcept(bool& exception_seen) {
+    const std::uint64_t faults_before = engine_faults_;
     try {
         return progress();
     } catch (const std::exception& e) {
         std::cerr << "[RendezvousLayer] node rank " << node_rank_ << ": progress failed: " << e.what() << "\n";
     } catch (...) {
         std::cerr << "[RendezvousLayer] node rank " << node_rank_ << ": progress failed (unknown exception)\n";
+    }
+    if (engine_faults_ != faults_before) {
+        // An engine exception, already latched: the layer is consistent and
+        // never calls the engine again, so keep serving control traffic and
+        // GET for the peers. engine_faulted_ makes this rank's decision "not ok".
+        return 0;
     }
     exception_seen = true;
     return 0;
@@ -516,7 +850,7 @@ bool RendezvousLayer::is_held(int source, std::uint32_t slot, std::uint64_t gene
     }
     for (std::size_t i = 0; i < recvs_.size(); ++i) {
         const RecvEntry& e = recvs_[i];
-        if ((e.state == kRecvMatched || e.state == kRecvFinPending) && e.source == source && e.slot == slot &&
+        if (recv_holds_rts(e.state) && e.source == source && e.slot == slot &&
             e.generation == generation) {
             return true;
         }
@@ -588,12 +922,14 @@ void RendezvousLayer::handle_fin(const ControlMessage& m) {
     // line 1 and (for GET) the receiver's copy of our source are complete.
     const RendezvousRecord& r = channel_.record(node_rank_, m.slot);
     const std::uint32_t proto = r.protocol;
-    if (proto == static_cast<std::uint32_t>(kProtoGet)) {
-        e.protocol = kProtoGet;
+    if (proto == static_cast<std::uint32_t>(kProtoGet) || proto == static_cast<std::uint32_t>(kProtoSteal)) {
+        // GET: the receiver copied. STEAL: the receiver CONFIRMED that every
+        // chunk was copied (test_transfer) before pushing this FIN.
+        e.protocol = static_cast<RendezvousProtocol>(proto);
         e.error = kRvOk;
         e.participants = r.participants;
     } else if (proto > kProtoErrorBase &&
-               proto <= kProtoErrorBase + static_cast<std::uint32_t>(kErrSequence)) {
+               proto <= kProtoErrorBase + static_cast<std::uint32_t>(kErrEngine)) {
         e.protocol = kProtoNone;
         e.error = static_cast<RendezvousError>(proto - kProtoErrorBase);
         e.participants = 0;
@@ -721,7 +1057,7 @@ std::size_t RendezvousLayer::active_recvs() const {
     std::size_t n = 0;
     for (std::size_t i = 0; i < recvs_.size(); ++i) {
         const RecvState s = recvs_[i].state;
-        if (s == kRecvPosted || s == kRecvMatched || s == kRecvFinPending) ++n;
+        if (recv_active(s)) ++n;
     }
     return n;
 }
@@ -809,19 +1145,48 @@ void RendezvousLayer::shutdown(double drain_timeout_sec, double barrier_timeout_
     // C. Final drain: nobody posts new requests any more (never throws).
     drain(drain_timeout_sec, exception_seen);
 
-    // D. Collective decision. Every rank that completed B reaches this point.
-    const int local_ok = (!exception_seen && quiescent() && seq_faults_ == 0 && protocol_errors_ == 0) ? 1 : 0;
+    // D. Collective decision. Every rank that completed B reaches this point,
+    //    and every rank makes exactly the same three MPI_Allreduce calls.
+    //    Engine state: a published transfer whose completion was never
+    //    confirmed keeps its engine slot in flight; workers may still read its
+    //    source and write its destination.
+    const std::uint64_t engine_in_flight = (engine_ != nullptr) ? engine_->in_flight() : 0;
+    const std::uint64_t engine_bad_handles =
+        (engine_ != nullptr) ? engine_->stale_handles() + engine_->invalid_handles() : 0;
+    const int local_ok = (!exception_seen && quiescent() && seq_faults_ == 0 && protocol_errors_ == 0 &&
+                          !engine_faulted_ && engine_in_flight == 0 && engine_bad_handles == 0)
+                             ? 1
+                             : 0;
     int all_ok = 0;
     unsigned long long counts[4] = {
         static_cast<unsigned long long>(active_sends() + active_recvs()),
         static_cast<unsigned long long>(posted_.size() + unexpected_.size() + orphans_.size()),
         static_cast<unsigned long long>(seq_faults_),
-        static_cast<unsigned long long>(protocol_errors_)};
+        static_cast<unsigned long long>(protocol_errors_ + engine_faults_ + engine_bad_handles)};
     unsigned long long totals[4] = {0, 0, 0, 0};
+    unsigned long long my_in_flight = static_cast<unsigned long long>(engine_in_flight);
+    unsigned long long node_in_flight = 0;
     if (MPI_Allreduce(&local_ok, &all_ok, 1, MPI_INT, MPI_MIN, comm) != MPI_SUCCESS ||
-        MPI_Allreduce(counts, totals, 4, MPI_UNSIGNED_LONG_LONG, MPI_SUM, comm) != MPI_SUCCESS) {
+        MPI_Allreduce(counts, totals, 4, MPI_UNSIGNED_LONG_LONG, MPI_SUM, comm) != MPI_SUCCESS ||
+        MPI_Allreduce(&my_in_flight, &node_in_flight, 1, MPI_UNSIGNED_LONG_LONG, MPI_SUM, comm) != MPI_SUCCESS) {
         state_ = kLayerFatal;
         throw RendezvousFatalError("RendezvousLayer: shutdown decision (MPI_Allreduce) failed; call MPI_Abort");
+    }
+
+    if (all_ok != 1 && node_in_flight != 0) {
+        // Same decision on every rank (node_in_flight is a global sum). Engine
+        // transfers are still in flight, so workers may still access source
+        // and destination memory and ChunkTaskEngine::shutdown() would time
+        // out on some ranks only: teardown is NOT safe.
+        state_ = kLayerFatal;
+        std::ostringstream msg;
+        msg << "RendezvousLayer: collective shutdown failed with " << node_in_flight
+            << " ChunkTaskEngine transfer(s) still in flight on the node (node rank " << node_rank_ << ": "
+            << engine_in_flight << ", engine " << (engine_faulted_ ? "FAULTED" : "healthy") << ", " << steal_failed_
+            << " held STEAL receive(s)). Workers may still access transfer memory; teardown is unsafe: call "
+            << "MPI_Abort; do not call ControlChannel::shutdown(), ChunkTaskEngine::shutdown(), "
+            << "ShmRegion::free() or MPI_Finalize.";
+        throw RendezvousFatalError(msg.str());
     }
 
     if (all_ok == 1) {
@@ -832,6 +1197,7 @@ void RendezvousLayer::shutdown(double drain_timeout_sec, double barrier_timeout_
         }
         for (std::size_t i = 0; i < sends_.size(); ++i) sends_[i].state = kSendFree;
         for (std::size_t i = 0; i < recvs_.size(); ++i) recvs_[i].state = kRecvFree;
+        deferred_.clear();
         state_ = kLayerInactive;
         return;
     }
@@ -841,6 +1207,8 @@ void RendezvousLayer::shutdown(double drain_timeout_sec, double barrier_timeout_
         << totals[1] << " unmatched, " << totals[2] << " sequence fault(s), " << totals[3]
         << " protocol error(s)); node rank " << node_rank_ << " local: " << (local_ok ? "clean" : "not clean")
         << (exception_seen ? ", progress raised an exception" : "")
-        << ". All ranks throw; ControlChannel::shutdown() and ShmRegion::free() are safe.";
+        << (engine_faulted_ ? ", engine faulted" : "")
+        << ". No engine transfer is in flight on the node. All ranks throw; ControlChannel::shutdown(), "
+        << "ChunkTaskEngine::shutdown() and ShmRegion::free() are safe.";
     throw RendezvousShutdownError(msg.str());
 }
