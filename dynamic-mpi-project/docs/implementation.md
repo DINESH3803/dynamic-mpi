@@ -8,16 +8,16 @@ The **Dynamic MPI Project** enforces a strict separation of concerns between thr
    - Implements a standard 3D 7-point Jacobi stencil computation on a distributed Cartesian grid.
    - Uses conventional non-blocking point-to-point MPI communication (`MPI_Isend`, `MPI_Irecv`, `MPI_Waitall`).
    - Serves as the authoritative ground truth for numerical correctness and baseline communication latency.
-   - **Current Status: Tasks 1–5 Fully Implemented and Verified on Cluster.**
+   - **Current Status: Tasks 1–5 Fully Implemented and Verified on Cluster.** Parts B (distributed Jacobi loop) and C (checksum and serial-reference comparison) were added on 2026-11-25; no cluster run of them is recorded yet.
 
 2. **Paper Reproduction (`apps/reproduction.cpp`):**
    - Reproduces the dynamic message passing protocol from *IEEE Cluster 2025* ("Towards Dynamic Message Passing Protocols For Stencil-based Communication Patterns").
    - Key mechanisms: Lock-free SPSC metadata queues, SPMC work-stealing queues, receiver-initiated coordination with atomic popcount bitmask tracking, protocol switching (GET vs. Cooperative vs. Work-Stealing), and library-managed receive buffers (`MPIX_Get_recv_buf`).
-   - **Current Status: Week 2 Objective — Pending Implementation.** (Modules are currently initialization skeletons).
+   - **Current Status (2026-11-26): intra-node protocol components implemented and tested; not yet integrated.** ShmRegion, SPSC/SPMC/MPSC queues, ChunkTaskEngine, ControlChannel and the RendezvousLayer with forced GET (Stage 2) and forced STEAL (Stage 3) are implemented and verified (Section 6). COOP, popcount-driven protocol selection, library-managed receive buffers and stencil integration are not implemented; `apps/reproduction.cpp` is still an MPI smoke test. Mechanism-by-mechanism status: `docs/PAPER_REPRODUCTION_AUDIT.md`.
 
 3. **Extension — Adaptive Chunking (`apps/extension.cpp`):**
    - Extends the reproduced protocol with an adaptive chunking policy that dynamically adjusts intra-node message chunk sizes based on runtime latency and contention feedback.
-   - **Current Status: Week 3 Objective — Pending Implementation.**
+   - **Current Status: Week 3 Objective — Pending Implementation.** (`extensions/adaptive_chunking.cpp` is a skeleton.)
 
 ```
 dynamic-mpi-project/
@@ -25,18 +25,21 @@ dynamic-mpi-project/
 │   ├── stencil.hpp                 -> 3D grid domain, memory layout & kernel interfaces
 │   ├── cartesian_decomposition.hpp -> 3D MPI Cartesian topology, block decomposition & neighbors
 │   ├── halo_exchange.hpp           -> Non-blocking 6-face halo exchange interface & persistent buffers
-│   ├── dynamic_protocol.hpp        -> Dynamic protocol interfaces (Week 2 skeleton)
-│   └── benchmark.hpp               -> Timing measurement, MPI_Reduce aggregation & reporting
-├── src/
-│   ├── stencil.cpp                 -> Grid3D implementation, deterministic init & Jacobi kernel
-│   ├── cartesian_decomposition.cpp -> MPI_Cart topology, coordinates, block partitioning & diagnostic gathering
-│   ├── halo_exchange.cpp           -> Non-blocking 6-face boundary exchange & verification logic
-│   ├── dynamic_protocol.cpp        -> Dynamic protocol logic (Week 2 skeleton)
-│   └── benchmark.cpp               -> MPI_Wtime timers and distributed statistics collection
+│   ├── benchmark.hpp               -> Timing measurement, MPI_Reduce aggregation & reporting
+│   ├── shm_region.hpp              -> Node-local MPI-3 shared-memory arena (offsets, not pointers)
+│   ├── spsc_queue.hpp              -> Bounded SPSC queue of uint64_t in the arena
+│   ├── spmc_queue.hpp              -> Bounded SPMC queue (sequence-numbered cells, CAS claim)
+│   ├── mpsc_queue.hpp              -> Bounded MPSC queue (tested; not used by the protocol)
+│   ├── chunk_task_engine.hpp       -> Per-rank SPMC task queue + transfer table, chunk stealing
+│   ├── control_channel.hpp         -> N^2 SPSC control transport + rendezvous records
+│   ├── rendezvous_layer.hpp        -> RTS/FIN rendezvous: GET (Stage 2), STEAL (Stage 3)
+│   └── dynamic_protocol.hpp        -> Dynamic protocol selection interfaces (skeleton)
+├── src/                            -> One implementation file per header above
 ├── apps/
 │   ├── baseline.cpp                -> Conventional baseline executable (Tasks 1-5 verified)
-│   ├── reproduction.cpp            -> Paper dynamic protocol reproduction executable
-│   └── extension.cpp               -> Adaptive chunking extension executable
+│   ├── reproduction.cpp            -> Paper reproduction executable (still an MPI smoke test)
+│   ├── extension.cpp               -> Adaptive chunking extension executable (smoke test)
+│   └── *_test.cpp                  -> One verification suite per Week 2 module (Section 6.2)
 └── extensions/
     └── adaptive_chunking.cpp       -> Runtime chunk-size adaptation policy (Week 3 skeleton)
 ```
@@ -150,6 +153,56 @@ The baseline verification suite was executed directly on the college HPC cluster
 | **Local 7-Point Stencil (Task 3)** | Week 1 | Completed | Jacobi stencil kernel, double buffering, ghost preservation |
 | **Cartesian Decomposition (Task 4)** | Week 1 | Completed | MPI_Cart topology, 1/2/3/4 proc layouts, remainder handling |
 | **Baseline Halo Exchange (Task 5)** | Week 1 | Completed | Non-blocking MPI Isend/Irecv boundary synchronization |
-| **Paper Dynamic Protocol** | Week 2 | Pending | Receiver-initiated protocol, SPSC queues, work-stealing |
+| **Distributed Jacobi loop + serial reference (Parts B/C)** | Week 1 | Implemented; cluster run not recorded | Time-stepped baseline, checksum, serial single-domain comparison |
+| **ShmRegion** | Week 2 | Completed | Node-local MPI-3 shared-memory arena |
+| **SPSC / SPMC / MPSC queues** | Week 2 | Completed | Lock-free bounded queues in the arena (MPSC not used by the protocol) |
+| **ChunkTaskEngine** | Week 2 | Completed | Chunked-copy work stealing over per-rank SPMC queues |
+| **ControlChannel (Stage 1)** | Week 2 | Completed | N^2 SPSC control transport, rendezvous records, credits |
+| **RendezvousLayer GET (Stage 2)** | Week 2 | Completed (forced protocol) | RTS/FIN, matching, error-FIN, sequence integrity, collective shutdown |
+| **RendezvousLayer STEAL (Stage 3)** | Week 2 | Completed (forced protocol) | Receiver-owned engine transfers, deferral, fault latching |
+| **COOP / dynamic protocol selection** | Week 2 | Pending (needs paper audit) | CTS-based cooperative copy; popcount-driven selection and chunk sizing |
+| **Stencil integration of the dynamic protocol** | Week 2 | Pending | `DynamicHaloExchange`; numerical equivalence with the baseline |
+| **Library-managed receive buffers / overlap** | Week 2 | Pending (needs paper audit) | User-level approximation of S12–S13 |
 | **Adaptive Chunking Extension** | Week 3 | Pending | Dynamic chunk-size adjustment based on latency feedback |
 | **Cluster Experiments & Scaling** | Week 4 | Pending | Multi-node scaling benchmarks, plots, paper comparison |
+
+---
+
+## 6. Week 2: Intra-Node Dynamic-Protocol Infrastructure
+
+All components are node-local: they live in one `ShmRegion` per node and use the node communicator (`MPI_Comm_split_type(MPI_COMM_TYPE_SHARED)`). Single-threaded MPI processes share memory; there are no helper threads. Paper mapping and validation status: `docs/PAPER_REPRODUCTION_AUDIT.md`. Slide analysis and open questions: `docs/paper_understanding.md`.
+
+### 6.1 Module layering
+
+| Layer | Files | Role |
+|---|---|---|
+| ShmRegion | `shm_region.{hpp,cpp}` | `MPI_Win_allocate_shared` arena on node rank 0; every reference stored in shared memory is a byte offset; `synchronize()` = fence/barrier/fence publication point |
+| SpscQueue / SpmcQueue / MpscQueue | `spsc_queue.*`, `spmc_queue.*`, `mpsc_queue.*` | Bounded lock-free queues of `uint64_t` in the arena; one owner initialises, others attach; `is_lock_free()` checked on the shared atomics |
+| ChunkTaskEngine | `chunk_task_engine.*` | One SPMC task queue + `TransferTable` per rank. `try_post_transfer` splits a copy into chunk tasks; `progress` runs own queue first, then remote queues; completion via `cmpl_counter` (acq_rel `fetch_add` / acquire load) and a participation bitset (popcount) |
+| ControlChannel | `control_channel.*` | N^2 SPSC queues `Q(i->j)` (diagonal included); 64-bit handles `[op | reserved | slot | generation]` naming out-of-line `RendezvousRecord`s owned by the sender; credit-based flow control (`queue_capacity >= 3 * credits_per_peer`) |
+| RendezvousLayer | `rendezvous_layer.*` | RTS/FIN rendezvous with `(source, tag)` FIFO matching. Stage 2: forced GET (receiver `memcpy`). Stage 3: forced STEAL (receiver publishes the transfer to its own engine queue; all node ranks execute chunks; FIN only after `test_transfer` confirms completion) |
+
+### 6.2 Verification suites
+
+`shm_region_test` (12 checks), `spsc_queue_test` (10), `spmc_queue_test` (11), `mpsc_queue_test` (12), `chunk_task_engine_test` (9), `control_channel_test` (10), `rendezvous_layer_test` (16, plus `--missing-rank`), `rendezvous_steal_test` (7, plus four `--fault=` scenarios). Test records: `docs/experiments.md` §5–§6.
+
+### 6.3 Key design decisions (engineering, not from the slides)
+
+1. **Offsets, not pointers**, in every shared structure; each process maps the arena at its own address.
+2. **Lock-free inter-process atomics required**: construction fails if `std::atomic<uint64_t>` is not lock-free (cluster check: lock-free, counter test 200000).
+3. **Handles + out-of-line records** instead of the slides' inline `{op_type, payload_size}` entries, because the verified SPSC queue carries `uint64_t`.
+4. **Credits**: at most S records per (sender, receiver); with capacity >= 3S a reply push can never find a full queue.
+5. **Sequence integrity**: per-pair RTS sequence numbers; a gap, duplicate or reordering faults the pair; every record receives at most one FIN.
+6. **Error-FIN**: size mismatch, invalid source or overlap complete both requests with the same error; nothing is copied.
+7. **Receiver-owned STEAL** (slides S11): the receiver creates the chunks; the sender learns of completion only through FIN; its source is reusable only after FIN.
+8. **Staging segments**: STEAL requires per-rank segments (sources and destinations in the caller's segment, RTS source in the sender's), making cross-rank buffer overlap impossible by construction.
+9. **Deferred FIFO**: STEAL receives are published only while `engine.in_flight() < table_slots`; no duplicate task sets.
+10. **Engine fault latching**: any engine exception after publication holds the affected transfers (no FIN) and makes shutdown fatal; a refusal before publication (unchanged `in_flight()`) gives error-FIN `kErrEngine`.
+11. **Collective shutdown**: local drain, `MPI_Ibarrier` with progress, final drain, `MPI_Allreduce` decision. All ranks return, all throw `RendezvousShutdownError` (teardown safe), or all throw `RendezvousFatalError` (engine transfers in flight or a missing rank: call `MPI_Abort`).
+
+### 6.4 Known limitations
+
+- GET and STEAL are **forced** per layer configuration; no popcount-driven selection, no COOP.
+- Fixed chunk size (`chunk_bytes`, default 1024 B); popcount is reported, not used.
+- Node-local only: the two-node runs verify independent per-node executions, not cross-node stealing.
+- Not yet used by any stencil executable.

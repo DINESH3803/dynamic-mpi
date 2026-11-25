@@ -323,6 +323,8 @@ Section 7.3 describes a portable approximation.
 
 ### 5.2 New modules required (proposed; none implemented)
 
+> **Status note (2026-11-26):** this table is the original Week 2 plan, kept unchanged for the record. Since then `shm_region`, `spsc_queue`, `spmc_queue`, the completion tracking (inside `chunk_task_engine`), the control transport (`control_channel`) and the RTS/FIN rendezvous with forced GET and STEAL (`rendezvous_layer`) have been implemented and tested; `progress_engine` is part of `RendezvousLayer::progress`. `managed_recv_buffers`, `DynamicHaloExchange` and the `apps/reproduction.cpp` integration are not implemented. Current status per mechanism: `docs/PAPER_REPRODUCTION_AUDIT.md`.
+
 All names are provisional **[Decision]**.
 
 | Module (proposed) | Responsibility | Paper element |
@@ -482,6 +484,8 @@ Our measurements will be reported as measured, on our hardware and scale, after 
 ---
 
 ## 8. Implementation Roadmap
+
+> **Status note (2026-11-26):** the checklist below is the original plan and has not been ticked retroactively. Phase 1–2 infrastructure and the forced GET/STEAL parts of Phases 3–4 are implemented and tested; Phase 5 (stencil integration) and Phase 6 (baseline comparison) are pending. The authoritative status is `PROJECT_TASKS.md` and `docs/PAPER_REPRODUCTION_AUDIT.md`.
 
 None of these items is implemented. The order follows the dependencies.
 
