@@ -1,0 +1,43 @@
+
+#!/bin/bash
+#PBS -q workq
+#PBS -l select=2:ncpus=4:mpiprocs=4
+#PBS -l place=scatter
+#PBS -l walltime=00:10:00
+#PBS -j oe
+
+echo "========== TWO-NODE CONTROL CHANNEL TEST =========="
+
+cd /home/student4/BT2024199/Project/dynamic-mpi/dynamic-mpi-project || exit 1
+
+echo "===== DIRECTORY DEBUG ====="
+pwd
+ls -l Makefile
+grep -n "control_channel_test" Makefile
+
+module load intel-2018
+
+echo "===== JOB DETAILS ====="
+echo "Job ID: $PBS_JOBID"
+echo "Node file: $PBS_NODEFILE"
+
+echo "===== ALLOCATED NODES ====="
+sort "$PBS_NODEFILE" | uniq -c
+
+HOST_COUNT=$(sort -u "$PBS_NODEFILE" | wc -l)
+
+if [ "$HOST_COUNT" -ne 2 ]; then
+    echo "ERROR: Expected 2 nodes, got $HOST_COUNT"
+    exit 1
+fi
+
+echo "===== COMPILING ====="
+make control_channel_test || exit 1
+
+echo "===== RUNNING TWO-NODE TEST ====="
+mpirun -np 8 -ppn 4 -f "$PBS_NODEFILE" ./build/control_channel_test
+
+RESULT=$?
+echo "===== TEST EXIT CODE: $RESULT ====="
+exit "$RESULT"
+
